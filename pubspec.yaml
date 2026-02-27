@@ -37,6 +37,15 @@ dependencies:
   firebase_core: any
   firebase_database: any
   intl: any
+  provider: any
+  path_provider: any
+  pdf: any
+  printing: any
+  image_picker: any
+  file_picker: any
+  firebase_auth: any
+  shared_preferences: any
+  open_file: any
 
 
 dev_dependencies:

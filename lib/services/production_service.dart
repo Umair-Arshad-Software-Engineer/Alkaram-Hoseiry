@@ -1,25 +1,21 @@
 import 'package:firebase_database/firebase_database.dart';
 import '../models/production_record.dart';
 import '../models/employee_models.dart';
+import 'ledger_service.dart';
 
 class ProductionServiceRealtime {
   final DatabaseReference _db = FirebaseDatabase.instance.ref();
+  final LedgerService _ledgerService = LedgerService();
 
-  // Reference paths
-  DatabaseReference get _activeSessionsRef => _db.child('active_sessions');
   DatabaseReference get _productionRecordsRef => _db.child('production_records');
   DatabaseReference get _employeesRef => _db.child('employees');
 
-  // Helper methods for type conversion
   int _toInt(dynamic value) {
     if (value == null) return 0;
     if (value is int) return value;
     if (value is double) return value.toInt();
     if (value is num) return value.toInt();
-    if (value is String) {
-      final parsed = int.tryParse(value);
-      return parsed ?? 0;
-    }
+    if (value is String) return int.tryParse(value) ?? 0;
     return 0;
   }
 
@@ -28,147 +24,146 @@ class ProductionServiceRealtime {
     if (value is double) return value;
     if (value is int) return value.toDouble();
     if (value is num) return value.toDouble();
-    if (value is String) {
-      final parsed = double.tryParse(value);
-      return parsed ?? 0.0;
-    }
+    if (value is String) return double.tryParse(value) ?? 0.0;
     return 0.0;
   }
 
-  // Start a new production session
-  Future<void> startProductionSession(PerPieceEmployee employee) async {
+  // ─── Save ───────────────────────────────────────────────────
+  Future<void> saveProductionEntries({
+    required PerPieceEmployee employee,
+    required int totalPieces,
+    required double totalEarnings,
+    required int totalMinutes,
+    required bool isHours, // ← NEW
+  })
+  async {
     try {
-      // Check if there's already an active session
-      final sessionSnapshot = await _activeSessionsRef.child(employee.id).get();
-      if (sessionSnapshot.exists) {
-        throw Exception('Employee already has an active session');
-      }
+      final now = DateTime.now();
+      final startTime = now.subtract(Duration(minutes: totalMinutes));
+      final piecesPerHour =
+      totalMinutes > 0 ? (totalPieces / totalMinutes) * 60.0 : 0.0;
 
-      final session = ActiveProductionSession(
-        employeeId: employee.id,
-        employeeName: employee.name,
-        startTime: DateTime.now(),
-        piecesProduced: 0,
-        ratePerPiece: employee.ratePerPiece,
-      );
+      final recordId = _productionRecordsRef.child(employee.id).push().key!;
 
-      await _activeSessionsRef.child(employee.id).set(session.toMap());
-    } catch (e) {
-      print('Error starting production session: $e');
-      rethrow;
-    }
-  }
-
-  // Update pieces during active session
-  Future<void> updatePiecesInSession(String employeeId, int additionalPieces) async {
-    try {
-      final sessionRef = _activeSessionsRef.child(employeeId);
-      final snapshot = await sessionRef.get();
-
-      if (!snapshot.exists) {
-        throw Exception('No active session found');
-      }
-
-      final currentPieces = _toInt(snapshot.child('piecesProduced').value);
-      await sessionRef.update({
-        'piecesProduced': currentPieces + additionalPieces,
-        'lastUpdated': DateTime.now().toIso8601String(),
-      });
-    } catch (e) {
-      print('Error updating pieces: $e');
-      rethrow;
-    }
-  }
-
-  // End production session and save record
-  Future<void> endProductionSession(String employeeId) async {
-    try {
-      final sessionSnapshot = await _activeSessionsRef.child(employeeId).get();
-
-      if (!sessionSnapshot.exists) {
-        throw Exception('No active session found');
-      }
-
-      final data = Map<String, dynamic>.from(sessionSnapshot.value as Map);
-      final session = ActiveProductionSession.fromMap(data);
-      final endTime = DateTime.now();
-      final durationInMinutes = endTime.difference(session.startTime).inMinutes;
-      final totalEarnings = session.ratePerPiece * session.piecesProduced;
-      final piecesPerHour = durationInMinutes > 0
-          ? (session.piecesProduced / durationInMinutes) * 60
-          : 0.0;
-
-      // Create production record
-      final recordId = _productionRecordsRef.child(employeeId).push().key!;
       final record = ProductionRecord(
         id: recordId,
-        employeeId: employeeId,
-        employeeName: session.employeeName,
-        piecesProduced: session.piecesProduced,
-        startTime: session.startTime,
-        endTime: endTime,
-        durationInMinutes: durationInMinutes,
-        ratePerPiece: session.ratePerPiece,
+        employeeId: employee.id,
+        employeeName: employee.name,
+        piecesProduced: totalPieces,
+        startTime: startTime,
+        endTime: now,
+        durationInMinutes: totalMinutes,
+        ratePerPiece: employee.ratePerPiece,
         totalEarnings: totalEarnings,
         piecesPerHour: piecesPerHour,
+        isHours: isHours, // ← NEW
       );
 
-      // Save record under employee's records
       await _productionRecordsRef
-          .child(employeeId)
+          .child(employee.id)
           .child(recordId)
           .set(record.toMap());
 
-      // Get current values
-      final currentPieces = await _getCurrentPiecesCompleted(employeeId);
-      final currentEarnings = await _getCurrentTotalEarnings(employeeId);
+      final currentPieces = await _getCurrentPiecesCompleted(employee.id);
+      final currentEarnings = await _getCurrentTotalEarnings(employee.id);
 
-      // Update employee's total pieces and earnings
-      await _employeesRef.child(employeeId).update({
-        'piecesCompleted': currentPieces + session.piecesProduced,
+      await _employeesRef.child(employee.id).update({
+        'piecesCompleted': currentPieces + totalPieces,
         'totalEarnings': currentEarnings + totalEarnings,
       });
 
-      // Delete active session
-      await _activeSessionsRef.child(employeeId).remove();
+      // Auto-create credit entry in ledger
+      await _ledgerService.addCreditEntry(
+        employeeId: employee.id,
+        amount: totalEarnings,
+        description:
+        'Production: $totalPieces pcs @ Rs ${employee.ratePerPiece.toStringAsFixed(2)}/pc',
+        referenceId: recordId,
+        date: now,
+      );
     } catch (e) {
-      print('Error ending production session: $e');
+      print('Error saving production entries: $e');
       rethrow;
     }
   }
 
-  Future<int> _getCurrentPiecesCompleted(String employeeId) async {
-    final snapshot = await _employeesRef.child(employeeId).child('piecesCompleted').get();
-    return _toInt(snapshot.value);
-  }
-
-  Future<double> _getCurrentTotalEarnings(String employeeId) async {
-    final snapshot = await _employeesRef.child(employeeId).child('totalEarnings').get();
-    return _toDouble(snapshot.value);
-  }
-
-  // Cancel active session
-  Future<void> cancelProductionSession(String employeeId) async {
+  // ─── Delete ─────────────────────────────────────────────────
+  Future<void> deleteProductionRecord({
+    required String employeeId,
+    required ProductionRecord record,
+  })
+  async {
     try {
-      await _activeSessionsRef.child(employeeId).remove();
+      // Remove the record
+      await _productionRecordsRef.child(employeeId).child(record.id).remove();
+
+      // Subtract from employee totals
+      final currentPieces = await _getCurrentPiecesCompleted(employeeId);
+      final currentEarnings = await _getCurrentTotalEarnings(employeeId);
+
+      await _employeesRef.child(employeeId).update({
+        'piecesCompleted':
+        (currentPieces - record.piecesProduced).clamp(0, double.maxFinite).toInt(),
+        'totalEarnings':
+        (currentEarnings - record.totalEarnings).clamp(0.0, double.maxFinite),
+      });
     } catch (e) {
-      print('Error cancelling session: $e');
+      print('Error deleting record: $e');
       rethrow;
     }
   }
 
-  // Get active session for an employee
-  Stream<ActiveProductionSession?> getActiveSession(String employeeId) {
-    return _activeSessionsRef.child(employeeId).onValue.map((event) {
-      if (event.snapshot.exists) {
-        final data = Map<String, dynamic>.from(event.snapshot.value as Map);
-        return ActiveProductionSession.fromMap(data);
-      }
-      return null;
-    });
+  // ─── Edit ───────────────────────────────────────────────────
+  Future<void> updateProductionRecord({
+    required String employeeId,
+    required ProductionRecord oldRecord,
+    required int newPieces,
+    required double newTotalEarnings,
+    required int newDurationMinutes,
+    required double newRatePerPiece,
+  })
+  async {
+    try {
+      final piecesPerHour = newDurationMinutes > 0
+          ? (newPieces / newDurationMinutes) * 60.0
+          : 0.0;
+
+      final updatedRecord = ProductionRecord(
+        id: oldRecord.id,
+        employeeId: oldRecord.employeeId,
+        employeeName: oldRecord.employeeName,
+        piecesProduced: newPieces,
+        startTime: oldRecord.startTime,
+        endTime: oldRecord.endTime,
+        durationInMinutes: newDurationMinutes,
+        ratePerPiece: newRatePerPiece,
+        totalEarnings: newTotalEarnings,
+        piecesPerHour: piecesPerHour,
+      );
+
+      await _productionRecordsRef
+          .child(employeeId)
+          .child(oldRecord.id)
+          .set(updatedRecord.toMap());
+
+      // Adjust employee totals by the difference
+      final currentPieces = await _getCurrentPiecesCompleted(employeeId);
+      final currentEarnings = await _getCurrentTotalEarnings(employeeId);
+
+      final pieceDiff = newPieces - oldRecord.piecesProduced;
+      final earningsDiff = newTotalEarnings - oldRecord.totalEarnings;
+
+      await _employeesRef.child(employeeId).update({
+        'piecesCompleted': (currentPieces + pieceDiff).clamp(0, 999999999),
+        'totalEarnings': (currentEarnings + earningsDiff).clamp(0.0, double.maxFinite),
+      });
+    } catch (e) {
+      print('Error updating record: $e');
+      rethrow;
+    }
   }
 
-  // Get production records for an employee
+  // ─── Streams ────────────────────────────────────────────────
   Stream<List<ProductionRecord>> getEmployeeProductionRecords(String employeeId) {
     return _productionRecordsRef.child(employeeId).onValue.map((event) {
       final List<ProductionRecord> records = [];
@@ -179,9 +174,7 @@ class ProductionServiceRealtime {
           if (value is Map) {
             try {
               final record = ProductionRecord.fromMap(
-                  key.toString(),
-                  Map<String, dynamic>.from(value)
-              );
+                  key.toString(), Map<String, dynamic>.from(value));
               records.add(record);
             } catch (e) {
               print('Error parsing record $key: $e');
@@ -190,13 +183,12 @@ class ProductionServiceRealtime {
         });
       }
 
-      // Sort by endTime descending
       records.sort((a, b) => b.endTime.compareTo(a.endTime));
       return records;
     });
   }
 
-  // Get production statistics for an employee
+  // ─── Stats ──────────────────────────────────────────────────
   Future<Map<String, dynamic>> getEmployeeProductionStats(String employeeId) async {
     try {
       final snapshot = await _productionRecordsRef.child(employeeId).get();
@@ -222,9 +214,7 @@ class ProductionServiceRealtime {
           sessionCount++;
           try {
             final record = ProductionRecord.fromMap(
-                key.toString(),
-                Map<String, dynamic>.from(value)
-            );
+                key.toString(), Map<String, dynamic>.from(value));
             totalPieces += record.piecesProduced;
             totalEarnings += record.totalEarnings;
             totalPiecesPerHour += record.piecesPerHour;
@@ -238,8 +228,10 @@ class ProductionServiceRealtime {
         'totalPieces': totalPieces,
         'totalEarnings': totalEarnings,
         'totalSessions': sessionCount,
-        'averagePiecesPerHour': sessionCount > 0 ? totalPiecesPerHour / sessionCount : 0.0,
-        'averagePiecesPerSession': sessionCount > 0 ? totalPieces / sessionCount : 0.0,
+        'averagePiecesPerHour':
+        sessionCount > 0 ? totalPiecesPerHour / sessionCount : 0.0,
+        'averagePiecesPerSession':
+        sessionCount > 0 ? totalPieces / sessionCount : 0.0,
       };
     } catch (e) {
       print('Error getting stats: $e');
@@ -252,4 +244,83 @@ class ProductionServiceRealtime {
       };
     }
   }
+
+  Future<int> _getCurrentPiecesCompleted(String employeeId) async {
+    final snapshot =
+    await _employeesRef.child(employeeId).child('piecesCompleted').get();
+    return _toInt(snapshot.value);
+  }
+
+  Future<double> _getCurrentTotalEarnings(String employeeId) async {
+    final snapshot =
+    await _employeesRef.child(employeeId).child('totalEarnings').get();
+    return _toDouble(snapshot.value);
+  }
+
+  Future<void> saveDozenProductionEntries({
+    required PerDozenEmployee employee,
+    required double totalDozens,
+    required int totalPieces,
+    required double totalEarnings,
+  })
+  async {
+    try {
+      final now = DateTime.now();
+      final recordId =
+      _productionRecordsRef.child(employee.id).push().key!;
+
+      // Reuse the production_records node; store dozens-specific fields
+      await _productionRecordsRef.child(employee.id).child(recordId).set({
+        'id': recordId,
+        'employeeId': employee.id,
+        'employeeName': employee.name,
+        'recordType': 'perdozen',           // distinguishes from perpiece
+        'totalDozens': totalDozens,
+        'piecesProduced': totalPieces,       // kept for shared summary queries
+        'ratePerDozen': employee.ratePerDozen,
+        'totalEarnings': totalEarnings,
+        'startTime': now.toIso8601String(),
+        'endTime': now.toIso8601String(),
+        // Fields below are zeroed out — not applicable for dozen tracking
+        'durationInMinutes': 0,
+        'piecesPerHour': 0.0,
+        'isHours': false,
+        'ratePerPiece': 0.0,
+      });
+
+      // Update employee aggregate totals
+      final currentDozens = await _getCurrentDozensCompleted(employee.id);
+      final currentEarnings = await _getCurrentTotalEarnings(employee.id);
+
+      await _employeesRef.child(employee.id).update({
+        'dozensCompleted': currentDozens + totalDozens,
+        'totalEarnings': currentEarnings + totalEarnings,
+        // Keep totalPieces in sync (dozensCompleted * 12 is derived, but store directly too)
+        'totalPieces': ((currentDozens + totalDozens) * 12).round(),
+      });
+
+      // Auto-create credit entry in ledger
+      await _ledgerService.addCreditEntry(
+        employeeId: employee.id,
+        amount: totalEarnings,
+        description:
+        'Production: ${totalDozens.toStringAsFixed(totalDozens % 1 == 0 ? 0 : 2)} doz '
+            '($totalPieces pcs) @ Rs ${employee.ratePerDozen.toStringAsFixed(2)}/doz',
+        referenceId: recordId,
+        date: now,
+      );
+    } catch (e) {
+      print('Error saving dozen production entries: $e');
+      rethrow;
+    }
+  }
+
+  Future<double> _getCurrentDozensCompleted(String employeeId) async {
+    final snapshot =
+    await _employeesRef.child(employeeId).child('dozensCompleted').get();
+    return _toDouble(snapshot.value);
+  }
+
+
+
 }

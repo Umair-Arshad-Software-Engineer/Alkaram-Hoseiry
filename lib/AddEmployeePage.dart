@@ -23,13 +23,14 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
   final _monthlySalaryController = TextEditingController();
   final _dailyRateController = TextEditingController();
   final _perPieceRateController = TextEditingController();
+  final _perDozenRateController = TextEditingController(); // New controller
 
   String _employeeType = 'Monthly';
   DateTime _joiningDate = DateTime.now();
   final DateFormat _dateFormat = DateFormat('dd/MM/yyyy');
   bool _isEditing = false;
 
-  List<String> get _employeeTypes => ['Monthly', 'Daily', 'Per Piece'];
+  List<String> get _employeeTypes => ['Monthly', 'Daily', 'Per Piece', 'Per Dozen']; // Added Per Dozen
 
   @override
   void initState() {
@@ -55,6 +56,8 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
       _dailyRateController.text = employee.dailyRate.toString();
     } else if (employee is PerPieceEmployee) {
       _perPieceRateController.text = employee.ratePerPiece.toString();
+    } else if (employee is PerDozenEmployee) {
+      _perDozenRateController.text = employee.ratePerDozen.toString();
     }
   }
 
@@ -245,6 +248,8 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
                         _buildDailyFields(),
                       if (_employeeType == 'Per Piece')
                         _buildPerPieceFields(),
+                      if (_employeeType == 'Per Dozen')
+                        _buildPerDozenFields(), // New field
                     ],
                   ),
                 ),
@@ -365,6 +370,48 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
     );
   }
 
+  // New Per Dozen fields
+  Widget _buildPerDozenFields() {
+    return Column(
+      children: [
+        TextFormField(
+          controller: _perDozenRateController,
+          decoration: const InputDecoration(
+            labelText: 'Rate per Dozen *',
+            border: OutlineInputBorder(),
+            prefixIcon: Icon(Icons.attach_money),
+            hintText: 'Enter rate per dozen (12 pieces)',
+          ),
+          keyboardType: TextInputType.number,
+          validator: (value) {
+            if (value == null || value.isEmpty) {
+              return 'Please enter rate per dozen';
+            }
+            if (double.tryParse(value) == null) {
+              return 'Please enter a valid number';
+            }
+            if (double.parse(value) <= 0) {
+              return 'Rate per dozen must be greater than 0';
+            }
+            return null;
+          },
+        ),
+        const SizedBox(height: 8),
+        const Padding(
+          padding: EdgeInsets.only(left: 8.0),
+          child: Text(
+            'Note: 1 dozen = 12 pieces',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   IconData _getTypeIcon(String type) {
     switch (type) {
       case 'Monthly':
@@ -373,6 +420,8 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
         return Icons.today;
       case 'Per Piece':
         return Icons.build;
+      case 'Per Dozen':
+        return Icons.grid_3x3; // Icon for dozen
       default:
         return Icons.person;
     }
@@ -409,6 +458,7 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
     _monthlySalaryController.clear();
     _dailyRateController.clear();
     _perPieceRateController.clear();
+    _perDozenRateController.clear(); // Clear new controller
   }
 
   void _submitForm() {
@@ -464,6 +514,22 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
             );
             break;
 
+          case 'Per Dozen': // New case
+            int dozensCompleted = 0;
+            if (_isEditing && widget.employeeToEdit is PerDozenEmployee) {
+              dozensCompleted = (widget.employeeToEdit as PerDozenEmployee).dozensCompleted;
+            }
+            employee = PerDozenEmployee(
+              id: id,
+              name: _nameController.text.trim(),
+              phone: _phoneController.text.trim(),
+              position: _positionController.text.trim(),
+              joiningDate: _joiningDate,
+              ratePerDozen: double.parse(_perDozenRateController.text),
+              dozensCompleted: dozensCompleted,
+            );
+            break;
+
           default:
             return;
         }
@@ -488,6 +554,7 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
     _monthlySalaryController.dispose();
     _dailyRateController.dispose();
     _perPieceRateController.dispose();
+    _perDozenRateController.dispose(); // Dispose new controller
     super.dispose();
   }
 }

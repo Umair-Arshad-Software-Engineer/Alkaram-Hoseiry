@@ -1,4 +1,3 @@
-import 'package:alkaram_hosiery/services/pdf_production_service.dart';
 import 'package:alkaram_hosiery/services/production_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,10 +12,11 @@ class _AppColors {
   static const surfaceElevated = Color(0xFFF0F3F8);
   static const border = Color(0xFFDDE3EE);
 
-  static const amber = Color(0xFFE8900A);
+  static const teal = Colors.teal;
   static const green = Color(0xFF0F9E74);
   static const blue = Color(0xFF2473CC);
   static const red = Color(0xFFD63B3B);
+  static const amber = Color(0xFFE8900A);
 
   static const textPrimary = Color(0xFF1A1F2E);
   static const textSecondary = Color(0xFF5A637A);
@@ -46,111 +46,90 @@ class _AppTextStyles {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Production Entry Model
-//  timeValue  = the number the user typed (e.g. 10 for 10 hrs, 45 for 45 min)
-//  isHours    = true if entered via Hours field, false if via Minutes field
-//  formula    = rate × pieces × timeValue   (regardless of unit)
+//  Dozen Production Entry Model
+//  total = ratePerDozen × dozens
 // ─────────────────────────────────────────────────────────────
-class ProductionEntry {
+class DozenProductionEntry {
   int index;
-  double ratePerPiece;
-  int pieces;
-  double timeValue;   // raw value as entered
-  bool isHours;       // true → hours, false → minutes
+  double ratePerDozen;
+  double dozens;
   double total;
 
-  ProductionEntry({
+  DozenProductionEntry({
     required this.index,
-    required this.ratePerPiece,
-    required this.pieces,
-    required this.timeValue,
-    required this.isHours,
-  }) : total = ratePerPiece * pieces * timeValue;
+    required this.ratePerDozen,
+    required this.dozens,
+  }) : total = ratePerDozen * dozens;
 
   void calculateTotal() {
-    total = ratePerPiece * pieces * timeValue;
+    total = ratePerDozen * dozens;
   }
 
-  /// Total time expressed in minutes (for saving to Firebase)
-  int get totalMinutes => isHours ? (timeValue * 60).toInt() : timeValue.toInt();
-
-  String get timeDisplay => isHours
-      ? '${timeValue.toStringAsFixed(timeValue % 1 == 0 ? 0 : 2)} hr'
-      : '${timeValue.toStringAsFixed(0)} min';
+  int get totalPieces => (dozens * 12).round();
 
   String get breakdownLabel =>
-      '${ratePerPiece.toStringAsFixed(2)} × $pieces × ${timeDisplay}';
+      '${ratePerDozen.toStringAsFixed(2)} × ${dozens.toStringAsFixed(dozens % 1 == 0 ? 0 : 2)} doz';
 }
 
 // ─────────────────────────────────────────────────────────────
 //  Main Page
 // ─────────────────────────────────────────────────────────────
-class ProductionTrackingPage extends StatefulWidget {
-  final PerPieceEmployee employee;
-  const ProductionTrackingPage({super.key, required this.employee});
+class DozenProductionTrackingPage extends StatefulWidget {
+  final PerDozenEmployee employee;
+  const DozenProductionTrackingPage({super.key, required this.employee});
 
   @override
-  State<ProductionTrackingPage> createState() => _ProductionTrackingPageState();
+  State<DozenProductionTrackingPage> createState() =>
+      _DozenProductionTrackingPageState();
 }
 
-class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
-  final ProductionServiceRealtime _productionService = ProductionServiceRealtime();
-  final List<ProductionEntry> _entries = [];
+class _DozenProductionTrackingPageState
+    extends State<DozenProductionTrackingPage> {
+  final ProductionServiceRealtime _productionService =
+  ProductionServiceRealtime();
+  final List<DozenProductionEntry> _entries = [];
 
   final TextEditingController _rateController = TextEditingController();
-  final TextEditingController _piecesController = TextEditingController();
-  final TextEditingController _timeController = TextEditingController();
-  bool _isGeneratingPdf = false; // Add this line
-
-  // Toggle: true = hours, false = minutes
-  bool _inputIsHours = false;
+  final TextEditingController _dozensController = TextEditingController();
 
   double _grandTotal = 0;
+  double _totalDozens = 0;
   int _totalPieces = 0;
-  int _totalMinutes = 0;
 
   bool _isSaving = false;
 
   @override
   void initState() {
     super.initState();
-    _rateController.text = widget.employee.ratePerPiece.toString();
+    _rateController.text = widget.employee.ratePerDozen.toString();
   }
 
   @override
   void dispose() {
     _rateController.dispose();
-    _piecesController.dispose();
-    _timeController.dispose();
+    _dozensController.dispose();
     super.dispose();
   }
 
   // ─── Entry Management ───────────────────────────────────────
   void _addEntry() {
-    final rate = double.tryParse(_rateController.text) ?? widget.employee.ratePerPiece;
-    final pieces = int.tryParse(_piecesController.text) ?? 0;
-    final timeValue = double.tryParse(_timeController.text) ?? 0;
+    final rate =
+        double.tryParse(_rateController.text) ?? widget.employee.ratePerDozen;
+    final dozens = double.tryParse(_dozensController.text) ?? 0;
 
-    if (pieces <= 0) {
-      _showSnack('Enter valid piece count', color: _AppColors.amber);
-      return;
-    }
-    if (timeValue <= 0) {
-      _showSnack('Enter valid time', color: _AppColors.amber);
+    if (dozens <= 0) {
+      _showSnack('Enter a valid dozen count', color: _AppColors.amber);
       return;
     }
 
     setState(() {
-      _entries.add(ProductionEntry(
+      _entries.add(DozenProductionEntry(
         index: _entries.length + 1,
-        ratePerPiece: rate,
-        pieces: pieces,
-        timeValue: timeValue,
-        isHours: _inputIsHours,
+        ratePerDozen: rate,
+        dozens: dozens,
       ));
       _calculateTotals();
-      _piecesController.clear();
-      _timeController.clear();
+      _dozensController.clear();
     });
 
     HapticFeedback.lightImpact();
@@ -169,13 +148,13 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
 
   void _calculateTotals() {
     _grandTotal = 0;
+    _totalDozens = 0;
     _totalPieces = 0;
-    _totalMinutes = 0;
     for (var entry in _entries) {
       entry.calculateTotal();
       _grandTotal += entry.total;
-      _totalPieces += entry.pieces;
-      _totalMinutes += entry.totalMinutes;
+      _totalDozens += entry.dozens;
+      _totalPieces += entry.totalPieces;
     }
   }
 
@@ -185,133 +164,37 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: _AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Clear All Entries',
-            style: TextStyle(color: _AppColors.textPrimary, fontWeight: FontWeight.w600)),
+            style: TextStyle(
+                color: _AppColors.textPrimary,
+                fontWeight: FontWeight.w600)),
         content: const Text('Are you sure you want to clear all entries?',
             style: TextStyle(color: _AppColors.textSecondary)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: _AppColors.textSecondary)),
+            child: const Text('Cancel',
+                style: TextStyle(color: _AppColors.textSecondary)),
           ),
           TextButton(
             onPressed: () {
               setState(() {
                 _entries.clear();
                 _grandTotal = 0;
+                _totalDozens = 0;
                 _totalPieces = 0;
-                _totalMinutes = 0;
               });
               Navigator.pop(context);
               HapticFeedback.mediumImpact();
             },
-            child: const Text('Clear All', style: TextStyle(color: _AppColors.red)),
+            child: const Text('Clear All',
+                style: TextStyle(color: _AppColors.red)),
           ),
         ],
       ),
     );
-  }
-
-  Widget _buildActionButtons() {
-    if (_entries.isEmpty) return const SizedBox();
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-      child: Row(
-        children: [
-          // PDF Button
-          Expanded(
-            child: _isGeneratingPdf
-                ? const Center(child: CircularProgressIndicator())
-                : _OutlineBtn(
-              label: 'PDF Preview',
-              color: _AppColors.blue,
-              onTap: _previewPdf,
-            ),
-          ),
-          const SizedBox(width: 12),
-          // Save Button
-          Expanded(
-            child: _isSaving
-                ? const Center(child: CircularProgressIndicator())
-                : _SolidBtn(
-              label: 'Save Entries',
-              color: _AppColors.green,
-              onTap: _saveEntries,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _previewPdf() async {
-    if (_entries.isEmpty) {
-      _showSnack('No entries to generate PDF', color: _AppColors.amber);
-      return;
-    }
-
-    final confirm = await _showConfirmSheet(
-      title: 'Generate Production Report',
-      subtitle: 'Create PDF report with ${_entries.length} entries',
-      confirmLabel: 'Generate',
-      confirmColor: _AppColors.blue,
-    );
-
-    if (confirm != true) return;
-
-    setState(() => _isGeneratingPdf = true);
-
-    try {
-      await ProductionPdfService.generateAndShowPdf(
-        context: context,
-        employee: widget.employee,
-        entries: List.from(_entries), // Create a copy
-        totalPieces: _totalPieces,
-        grandTotal: _grandTotal,
-        totalMinutes: _totalMinutes,
-        date: DateTime.now(),
-      );
-    } catch (e) {
-      _showSnack('Error generating PDF: $e', color: _AppColors.red);
-    } finally {
-      setState(() => _isGeneratingPdf = false);
-    }
-  }
-
-  Future<void> _savePdfToDevice() async {
-    if (_entries.isEmpty) {
-      _showSnack('No entries to save', color: _AppColors.amber);
-      return;
-    }
-
-    final confirm = await _showConfirmSheet(
-      title: 'Save PDF to Device',
-      subtitle: 'Download production report to your device',
-      confirmLabel: 'Download',
-      confirmColor: _AppColors.blue,
-    );
-
-    if (confirm != true) return;
-
-    setState(() => _isGeneratingPdf = true);
-
-    try {
-      await ProductionPdfService.savePdfToDevice(
-        context: context,
-        employee: widget.employee,
-        entries: List.from(_entries),
-        totalPieces: _totalPieces,
-        grandTotal: _grandTotal,
-        totalMinutes: _totalMinutes,
-        date: DateTime.now(),
-      );
-    } catch (e) {
-      _showSnack('Error saving PDF: $e', color: _AppColors.red);
-    } finally {
-      setState(() => _isGeneratingPdf = false);
-    }
   }
 
   // ─── Save ───────────────────────────────────────────────────
@@ -324,7 +207,7 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
     final confirm = await _showConfirmSheet(
       title: 'Save Production Data',
       subtitle:
-      '${_entries.length} entries · $_totalPieces pieces · ${_grandTotal.toStringAsFixed(2)} total',
+      '${_entries.length} entries · ${_totalDozens.toStringAsFixed(_totalDozens % 1 == 0 ? 0 : 2)} doz · $_totalPieces pcs · Rs ${_grandTotal.toStringAsFixed(2)}',
       confirmLabel: 'Save',
       confirmColor: _AppColors.green,
     );
@@ -333,20 +216,18 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
     setState(() => _isSaving = true);
 
     try {
-      await _productionService.saveProductionEntries(
+      await _productionService.saveDozenProductionEntries(
         employee: widget.employee,
+        totalDozens: _totalDozens,
         totalPieces: _totalPieces,
         totalEarnings: _grandTotal,
-        totalMinutes: _totalMinutes,
-        isHours: _entries.isNotEmpty && _entries.every((e) => e.isHours), // ← NEW
-
       );
 
       setState(() {
         _entries.clear();
         _grandTotal = 0;
+        _totalDozens = 0;
         _totalPieces = 0;
-        _totalMinutes = 0;
       });
 
       _showSnack('Production data saved successfully');
@@ -437,14 +318,6 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
     );
   }
 
-  String _formatTotalTime() {
-    final hrs = _totalMinutes ~/ 60;
-    final mins = _totalMinutes % 60;
-    if (hrs == 0) return '$mins min';
-    if (mins == 0) return '$hrs hr';
-    return '$hrs hr $mins min';
-  }
-
   // ─────────────────────────────────────────────────────────────
   //  BUILD
   // ─────────────────────────────────────────────────────────────
@@ -453,7 +326,7 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
     return Theme(
       data: ThemeData.light().copyWith(
         scaffoldBackgroundColor: _AppColors.bg,
-        colorScheme: const ColorScheme.light(primary: _AppColors.amber),
+        colorScheme: ColorScheme.light(primary: Colors.teal),
       ),
       child: Scaffold(
         backgroundColor: _AppColors.bg,
@@ -495,22 +368,17 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
                   fontSize: 16,
                   fontWeight: FontWeight.w600)),
           Text(
-              'Rate: ${widget.employee.ratePerPiece.toStringAsFixed(2)}/pc',
-              style: const TextStyle(color: _AppColors.amber, fontSize: 12)),
+              'Rate: ${widget.employee.ratePerDozen.toStringAsFixed(2)}/doz',
+              style: const TextStyle(color: Colors.teal, fontSize: 12)),
         ],
       ),
       actions: [
-        if (_entries.isNotEmpty) ...[
+        if (_entries.isNotEmpty)
           IconButton(
-            icon: const Icon(Icons.picture_as_pdf, color: _AppColors.blue),
-            onPressed: _previewPdf,
-            tooltip: 'Generate PDF',
-          ),
-          IconButton(
-            icon: const Icon(Icons.delete_sweep_outlined, color: _AppColors.red),
+            icon: const Icon(Icons.delete_sweep_outlined,
+                color: _AppColors.red),
             onPressed: _clearAllEntries,
           ),
-        ],
       ],
     );
   }
@@ -533,87 +401,36 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Row 1: Rate + Pieces
+          // Row: Rate + Dozens + Add button
           Row(children: [
             Expanded(
                 child: _LightTextField(
                     controller: _rateController,
-                    label: 'Rate/pc',
+                    label: 'Rate/dozen',
                     suffix: 'Rs',
-                    keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true))),
+                    accentColor: Colors.teal,
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true))),
             const SizedBox(width: 8),
             Expanded(
                 child: _LightTextField(
-                    controller: _piecesController,
-                    label: 'Pieces',
-                    suffix: 'pcs',
-                    keyboardType: TextInputType.number)),
-          ]),
-          const SizedBox(height: 8),
-          // Row 2: Time input + unit toggle + Add button
-          Row(children: [
-            Expanded(
-              child: _LightTextField(
-                controller: _timeController,
-                label: _inputIsHours ? 'Time (Hours)' : 'Time (Minutes)',
-                suffix: _inputIsHours ? 'hr' : 'min',
-                keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
-              ),
-            ),
-            const SizedBox(width: 8),
-            // Unit toggle
-            GestureDetector(
-              onTap: () => setState(() => _inputIsHours = !_inputIsHours),
-              child: Container(
-                height: 46,
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                decoration: BoxDecoration(
-                  color: _inputIsHours
-                      ? _AppColors.blue.withOpacity(0.1)
-                      : _AppColors.amber.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color: _inputIsHours
-                        ? _AppColors.blue.withOpacity(0.4)
-                        : _AppColors.amber.withOpacity(0.4),
-                  ),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      _inputIsHours ? Icons.schedule : Icons.timer_outlined,
-                      size: 14,
-                      color: _inputIsHours ? _AppColors.blue : _AppColors.amber,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _inputIsHours ? 'HRS' : 'MIN',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: _inputIsHours
-                            ? _AppColors.blue
-                            : _AppColors.amber,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+                    controller: _dozensController,
+                    label: 'Dozens',
+                    suffix: 'doz',
+                    accentColor: Colors.teal,
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true))),
             const SizedBox(width: 8),
             _SolidBtn(
                 label: 'Add',
-                color: _AppColors.amber,
+                color: Colors.teal,
                 onTap: _addEntry,
                 compact: true),
           ]),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           // Formula preview
-          Text(
-            'Formula: Rate × Pieces × Time  →  result',
+          const Text(
+            'Formula: Rate/dozen × Dozens  →  total  (1 dozen = 12 pieces)',
             style: TextStyle(
                 fontSize: 11,
                 color: _AppColors.textMuted,
@@ -643,10 +460,10 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
               child: Text('Rate', style: _AppTextStyles.tableHeader)),
           Expanded(
               flex: 2,
-              child: Text('Pieces', style: _AppTextStyles.tableHeader)),
+              child: Text('Dozens', style: _AppTextStyles.tableHeader)),
           Expanded(
-              flex: 3,
-              child: Text('Time', style: _AppTextStyles.tableHeader)),
+              flex: 2,
+              child: Text('Pieces', style: _AppTextStyles.tableHeader)),
           Expanded(
               flex: 3,
               child: Text('Total', style: _AppTextStyles.tableHeader)),
@@ -665,7 +482,8 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: const BoxDecoration(
-                  color: _AppColors.surfaceElevated, shape: BoxShape.circle),
+                  color: _AppColors.surfaceElevated,
+                  shape: BoxShape.circle),
               child: const Icon(Icons.table_rows_outlined,
                   size: 36, color: _AppColors.textMuted),
             ),
@@ -677,7 +495,8 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
                     fontWeight: FontWeight.w500)),
             const SizedBox(height: 6),
             const Text('Add production entries using the form above',
-                style: TextStyle(color: _AppColors.textMuted, fontSize: 13)),
+                style:
+                TextStyle(color: _AppColors.textMuted, fontSize: 13)),
           ],
         ),
       );
@@ -690,13 +509,14 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
         final entry = _entries[index];
         return Container(
           margin: const EdgeInsets.only(bottom: 2),
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+          padding:
+          const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
           decoration: BoxDecoration(
             color: index.isOdd
                 ? _AppColors.surfaceElevated
                 : _AppColors.surface,
-            border:
-            Border.all(color: _AppColors.border.withOpacity(0.6)),
+            border: Border.all(
+                color: _AppColors.border.withOpacity(0.6)),
           ),
           child: Row(
             children: [
@@ -708,31 +528,30 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
               ),
               Expanded(
                   flex: 2,
-                  child: Text(
-                      entry.ratePerPiece.toStringAsFixed(2),
+                  child: Text(entry.ratePerDozen.toStringAsFixed(2),
                       style: _AppTextStyles.tableCell)),
               Expanded(
-                  flex: 2,
-                  child: Text('${entry.pieces}',
-                      style: _AppTextStyles.tableCell)),
+                flex: 2,
+                child: Text(
+                  entry.dozens.toStringAsFixed(
+                      entry.dozens % 1 == 0 ? 0 : 2),
+                  style: _AppTextStyles.tableCell,
+                ),
+              ),
               Expanded(
-                flex: 3,
+                flex: 2,
                 child: Container(
-                  padding:
-                  const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: entry.isHours
-                        ? _AppColors.blue.withOpacity(0.08)
-                        : _AppColors.amber.withOpacity(0.08),
+                    color: Colors.teal.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
-                    entry.timeDisplay,
+                    '${entry.totalPieces} pcs',
                     style: _AppTextStyles.tableCell.copyWith(
-                      fontSize: 13,
-                      color: entry.isHours
-                          ? _AppColors.blue
-                          : _AppColors.amber,
+                      fontSize: 12,
+                      color: Colors.teal,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -749,7 +568,8 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
                             fontWeight: FontWeight.w600)),
                     Text(entry.breakdownLabel,
                         style: const TextStyle(
-                            fontSize: 9, color: _AppColors.textMuted)),
+                            fontSize: 9,
+                            color: _AppColors.textMuted)),
                   ],
                 ),
               ),
@@ -789,11 +609,19 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
       ),
       child: Column(
         children: [
-          _totalRow('Total Pieces:', '$_totalPieces',
-              _AppTextStyles.totalText.copyWith(color: _AppColors.amber)),
+          _totalRow(
+            'Total Dozens:',
+            _totalDozens.toStringAsFixed(
+                _totalDozens % 1 == 0 ? 0 : 2),
+            _AppTextStyles.totalText.copyWith(color: Colors.teal),
+          ),
           const SizedBox(height: 8),
-          _totalRow('Total Time:', _formatTotalTime(),
-              _AppTextStyles.totalText.copyWith(color: _AppColors.blue)),
+          _totalRow(
+            'Total Pieces:',
+            '$_totalPieces',
+            _AppTextStyles.totalText
+                .copyWith(color: _AppColors.amber),
+          ),
           const Divider(color: _AppColors.border, height: 20),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -802,8 +630,9 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
                   style: TextStyle(
                       color: _AppColors.textPrimary,
                       fontWeight: FontWeight.w600)),
-              Text(_grandTotal.toStringAsFixed(2),
-                  style: _AppTextStyles.totalText.copyWith(fontSize: 22)),
+              Text('Rs ${_grandTotal.toStringAsFixed(2)}',
+                  style:
+                  _AppTextStyles.totalText.copyWith(fontSize: 22)),
             ],
           ),
         ],
@@ -811,17 +640,34 @@ class _ProductionTrackingPageState extends State<ProductionTrackingPage> {
     );
   }
 
-  Widget _totalRow(String label, String value, TextStyle valueStyle) {
+  Widget _totalRow(
+      String label, String value, TextStyle valueStyle) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(label,
-            style: const TextStyle(color: _AppColors.textSecondary)),
+            style:
+            const TextStyle(color: _AppColors.textSecondary)),
         Text(value, style: valueStyle),
       ],
     );
   }
 
+  Widget _buildActionButtons() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+      child: SizedBox(
+        width: double.infinity,
+        child: _isSaving
+            ? const Center(child: CircularProgressIndicator())
+            : _SolidBtn(
+          label: 'Save Entries',
+          color: _AppColors.green,
+          onTap: _saveEntries,
+        ),
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -832,12 +678,14 @@ class _LightTextField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
   final String suffix;
+  final Color accentColor;
   final TextInputType keyboardType;
 
   const _LightTextField({
     required this.controller,
     required this.label,
     required this.suffix,
+    this.accentColor = Colors.teal,
     this.keyboardType = TextInputType.text,
   });
 
@@ -846,15 +694,16 @@ class _LightTextField extends StatelessWidget {
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
-      style: const TextStyle(color: _AppColors.textPrimary, fontSize: 14),
-      cursorColor: _AppColors.amber,
+      style: const TextStyle(
+          color: _AppColors.textPrimary, fontSize: 14),
+      cursorColor: accentColor,
       decoration: InputDecoration(
         labelText: label,
-        labelStyle:
-        const TextStyle(color: _AppColors.textSecondary, fontSize: 12),
+        labelStyle: const TextStyle(
+            color: _AppColors.textSecondary, fontSize: 12),
         suffixText: suffix,
-        suffixStyle:
-        const TextStyle(color: _AppColors.textMuted, fontSize: 11),
+        suffixStyle: const TextStyle(
+            color: _AppColors.textMuted, fontSize: 11),
         filled: true,
         fillColor: _AppColors.surfaceElevated,
         contentPadding:
@@ -865,7 +714,7 @@ class _LightTextField extends StatelessWidget {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(6),
-          borderSide: const BorderSide(color: _AppColors.amber, width: 1.5),
+          borderSide: BorderSide(color: accentColor, width: 1.5),
         ),
         isDense: true,
       ),
@@ -896,10 +745,11 @@ class _SolidBtn extends StatelessWidget {
           backgroundColor: color,
           foregroundColor: Colors.white,
           elevation: 0,
-          padding:
-          compact ? const EdgeInsets.symmetric(horizontal: 18) : null,
-          shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          padding: compact
+              ? const EdgeInsets.symmetric(horizontal: 18)
+              : null,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8)),
         ),
         child: Text(label,
             style: TextStyle(
@@ -935,8 +785,8 @@ class _OutlineBtn extends StatelessWidget {
               color: color == _AppColors.border
                   ? _AppColors.border
                   : color.withOpacity(0.6)),
-          shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8)),
         ),
         child: Text(label,
             style: const TextStyle(
@@ -945,4 +795,3 @@ class _OutlineBtn extends StatelessWidget {
     );
   }
 }
-

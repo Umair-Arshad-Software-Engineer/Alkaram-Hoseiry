@@ -108,6 +108,7 @@ class RealtimeDatabaseService {
       int monthly = 0;
       int daily = 0;
       int perPiece = 0;
+      int perDozen = 0; // New counter
 
       if (data != null && data is Map) {
         total = data.length;
@@ -124,6 +125,9 @@ class RealtimeDatabaseService {
               case 'perpiece':
                 perPiece++;
                 break;
+              case 'perdozen': // New case
+                perDozen++;
+                break;
             }
           }
         });
@@ -134,6 +138,7 @@ class RealtimeDatabaseService {
         'monthly': monthly,
         'daily': daily,
         'perPiece': perPiece,
+        'perDozen': perDozen, // New field
       };
     } catch (e) {
       print('Error getting statistics: $e');
@@ -142,6 +147,7 @@ class RealtimeDatabaseService {
         'monthly': 0,
         'daily': 0,
         'perPiece': 0,
+        'perDozen': 0, // New field
       };
     }
   }

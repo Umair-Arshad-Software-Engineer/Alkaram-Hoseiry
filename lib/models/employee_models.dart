@@ -32,6 +32,8 @@ abstract class Employee {
         return DailyEmployee.fromMap(id, map);
       case 'perpiece':
         return PerPieceEmployee.fromMap(id, map);
+      case 'perdozen':
+        return PerDozenEmployee.fromMap(id, map);
       default:
         throw Exception('Unknown employee type: $type');
     }
@@ -45,6 +47,8 @@ abstract class Employee {
         return 'Daily';
       case 'perpiece':
         return 'Per Piece';
+      case 'perdozen':
+        return 'Per Dozen';
       default:
         return 'Unknown';
     }
@@ -58,6 +62,8 @@ abstract class Employee {
         return Colors.orange;
       case 'perpiece':
         return Colors.purple;
+      case 'perdozen':
+        return Colors.teal;
       default:
         return Colors.blue;
     }
@@ -185,6 +191,106 @@ class PerPieceEmployee extends Employee {
       joiningDate: DateTime.parse(map['joiningDate'] ?? DateTime.now().toIso8601String()),
       ratePerPiece: (map['ratePerPiece'] ?? 0).toDouble(),
       piecesCompleted: map['piecesCompleted'] ?? 0,
+    );
+  }
+}
+
+class PerDozenEmployee extends Employee {
+  final double ratePerDozen;
+  final int dozensCompleted; // Could be fractional dozens, but using int for simplicity
+
+  PerDozenEmployee({
+    required super.id,
+    required super.name,
+    required super.phone,
+    required super.position,
+    required super.joiningDate,
+    required this.ratePerDozen,
+    required this.dozensCompleted,
+  }) : super(employeeType: 'perdozen');
+
+  double get totalEarnings => ratePerDozen * dozensCompleted;
+
+  // Get pieces equivalent (dozens * 12)
+  int get totalPieces => dozensCompleted * 12;
+
+  @override
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'phone': phone,
+      'position': position,
+      'joiningDate': joiningDate.toIso8601String(),
+      'employeeType': 'perdozen',
+      'ratePerDozen': ratePerDozen,
+      'dozensCompleted': dozensCompleted,
+      'totalEarnings': totalEarnings,
+      'totalPieces': totalPieces,
+    };
+  }
+
+  factory PerDozenEmployee.fromMap(String id, Map<String, dynamic> map) {
+    return PerDozenEmployee(
+      id: id,
+      name: map['name'] ?? '',
+      phone: map['phone'] ?? '',
+      position: map['position'] ?? '',
+      joiningDate: DateTime.parse(map['joiningDate'] ?? DateTime.now().toIso8601String()),
+      ratePerDozen: (map['ratePerDozen'] ?? 0).toDouble(),
+      dozensCompleted: map['dozensCompleted'] ?? 0,
+    );
+  }
+}
+
+class PerDozenProductionRecord {
+  final String id;
+  final String employeeId;
+  final String employeeName;
+  final double dozens;
+  final int pieces;
+  final double earnings;
+  final double ratePerDozen;
+  final DateTime timestamp;
+  final String? notes;
+
+  PerDozenProductionRecord({
+    required this.id,
+    required this.employeeId,
+    required this.employeeName,
+    required this.dozens,
+    required this.pieces,
+    required this.earnings,
+    required this.ratePerDozen,
+    required this.timestamp,
+    this.notes,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'employeeId': employeeId,
+      'employeeName': employeeName,
+      'dozens': dozens,
+      'pieces': pieces,
+      'earnings': earnings,
+      'ratePerDozen': ratePerDozen,
+      'timestamp': timestamp.toIso8601String(),
+      if (notes != null) 'notes': notes,
+    };
+  }
+
+  factory PerDozenProductionRecord.fromMap(String id, Map<String, dynamic> map) {
+    return PerDozenProductionRecord(
+      id: id,
+      employeeId: map['employeeId'] ?? '',
+      employeeName: map['employeeName'] ?? '',
+      dozens: (map['dozens'] ?? 0).toDouble(),
+      pieces: map['pieces'] ?? 0,
+      earnings: (map['earnings'] ?? 0).toDouble(),
+      ratePerDozen: (map['ratePerDozen'] ?? 0).toDouble(),
+      timestamp: DateTime.parse(map['timestamp']),
+      notes: map['notes'],
     );
   }
 }

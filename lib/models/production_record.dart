@@ -9,6 +9,7 @@ class ProductionRecord {
   final double ratePerPiece;
   final double totalEarnings;
   final double piecesPerHour;
+  final bool isHours; // ← NEW
 
   ProductionRecord({
     required this.id,
@@ -21,6 +22,7 @@ class ProductionRecord {
     required this.ratePerPiece,
     required this.totalEarnings,
     required this.piecesPerHour,
+    this.isHours = false, // ← NEW
   });
 
   factory ProductionRecord.fromMap(String id, Map<String, dynamic> map) {
@@ -35,6 +37,7 @@ class ProductionRecord {
       ratePerPiece: (map['ratePerPiece'] ?? 0).toDouble(),
       totalEarnings: (map['totalEarnings'] ?? 0).toDouble(),
       piecesPerHour: (map['piecesPerHour'] ?? 0).toDouble(),
+      isHours: map['isHours'] ?? false, // ← NEW
     );
   }
 
@@ -49,48 +52,8 @@ class ProductionRecord {
       'ratePerPiece': ratePerPiece,
       'totalEarnings': totalEarnings,
       'piecesPerHour': piecesPerHour,
+      'isHours': isHours, // ← NEW
     };
   }
 }
 
-class ActiveProductionSession {
-  final String employeeId;
-  final String employeeName;
-  final DateTime startTime;
-  final int piecesProduced;
-  final double ratePerPiece;
-  final DateTime? lastUpdated;
-
-  ActiveProductionSession({
-    required this.employeeId,
-    required this.employeeName,
-    required this.startTime,
-    required this.piecesProduced,
-    required this.ratePerPiece,
-    this.lastUpdated,
-  });
-
-  factory ActiveProductionSession.fromMap(Map<String, dynamic> map) {
-    return ActiveProductionSession(
-      employeeId: map['employeeId'] ?? '',
-      employeeName: map['employeeName'] ?? '',
-      startTime: DateTime.parse(map['startTime'] ?? DateTime.now().toIso8601String()),
-      piecesProduced: map['piecesProduced'] ?? 0,
-      ratePerPiece: (map['ratePerPiece'] ?? 0).toDouble(),
-      lastUpdated: map['lastUpdated'] != null
-          ? DateTime.parse(map['lastUpdated'])
-          : null,
-    );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'employeeId': employeeId,
-      'employeeName': employeeName,
-      'startTime': startTime.toIso8601String(),
-      'piecesProduced': piecesProduced,
-      'ratePerPiece': ratePerPiece,
-      'lastUpdated': DateTime.now().toIso8601String(),
-    };
-  }
-}
