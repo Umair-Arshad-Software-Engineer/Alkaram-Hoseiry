@@ -76,7 +76,8 @@ class LedgerService {
     required String description,
     String? referenceId,
     DateTime? date,
-  }) async {
+  })
+  async {
     final ref = _ledgerRef(employeeId).push();
     final entry = LedgerEntry(
       id: ref.key!,
@@ -96,7 +97,8 @@ class LedgerService {
     required double amount,
     required String description,
     DateTime? date,
-  }) async {
+  })
+  async {
     final ref = _ledgerRef(employeeId).push();
     final entry = LedgerEntry(
       id: ref.key!,

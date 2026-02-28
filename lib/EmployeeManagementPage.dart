@@ -2,6 +2,7 @@ import 'package:alkaram_hosiery/services/employee_services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'AddEmployeePage.dart';
+import 'MonthlySalaryPage.dart';
 import 'ProductionRecordsPage.dart';
 import 'EmployeeLedgerPage.dart';
 import 'dozenproduction.dart';
@@ -305,13 +306,6 @@ class _EmployeeManagementPageState extends State<EmployeeManagementPage>
                 );
               }
             },
-            // onViewRecords: (e) => Navigator.push(
-            //   context,
-            //   MaterialPageRoute(
-            //     builder: (_) =>
-            //         ProductionRecordsPage(employee: e),
-            //   ),
-            // ),
             onViewRecords: (e) {
               if (e is PerPieceEmployee) {
                 Navigator.push(
@@ -526,6 +520,8 @@ class _EmployeeListView extends StatelessWidget {
         return _C.amber;
       case 'perpiece':
         return _C.purple;
+      case 'perdozen':
+        return Colors.teal;
       default:
         return _C.blue;
     }
@@ -539,6 +535,8 @@ class _EmployeeListView extends StatelessWidget {
         return 'Daily';
       case 'perpiece':
         return 'Per Piece';
+      case 'perdozen':
+        return 'Per Dozen';
       default:
         return type;
     }
@@ -546,11 +544,12 @@ class _EmployeeListView extends StatelessWidget {
 
   String _subtitleRate(Employee e) {
     if (e is MonthlyEmployee)
-      return 'Rs ${e.monthlySalary.toStringAsFixed(0)}/month';
-    if (e is DailyEmployee) return 'Rs ${e.dailyRate.toStringAsFixed(0)}/day';
+      return 'Rs ${e.monthlySalary.toStringAsFixed(0)}/month · ${e.daysWorked} days';
+    if (e is DailyEmployee)
+      return 'Rs ${e.dailyRate.toStringAsFixed(0)}/day · ${e.daysWorked} days';
     if (e is PerPieceEmployee)
       return 'Rs ${e.ratePerPiece.toStringAsFixed(2)}/pc · ${e.piecesCompleted} pcs';
-    if (e is PerDozenEmployee) // New case
+    if (e is PerDozenEmployee)
       return 'Rs ${e.ratePerDozen.toStringAsFixed(2)}/doz · ${e.dozensCompleted} doz (${e.totalPieces} pcs)';
     return '';
   }
@@ -709,6 +708,39 @@ class _EmployeeListView extends StatelessWidget {
                           onTap: () => onEdit(employee),
                           tooltip: 'Edit',
                         ),
+// Monthly Employee buttons
+                        if (employee is MonthlyEmployee) ...[
+                          const SizedBox(height: 4),
+                          _iconBtn(
+                            icon: Icons.calendar_month_outlined,
+                            color: _C.green,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => MonthlySalaryTrackingPage(
+                                    employee: employee,
+                                  ),
+                                ),
+                              );
+                            },
+                            tooltip: 'Track Monthly Salary',
+                          ),
+                          // const SizedBox(height: 4),
+                          // _iconBtn(
+                          //   icon: Icons.receipt_long_outlined,
+                          //   color: _C.amber,
+                          //   onTap: () => onViewRecords(employee),
+                          //   tooltip: 'View Records',
+                          // ),
+                          const SizedBox(height: 4),
+                          _iconBtn(
+                            icon: Icons.account_balance_outlined,
+                            color: _C.green,
+                            onTap: () => onViewLedger(employee),
+                            tooltip: 'Ledger',
+                          ),
+                        ],
 
                         // Production buttons for Per Piece employees
                         if (employee is PerPieceEmployee) ...[

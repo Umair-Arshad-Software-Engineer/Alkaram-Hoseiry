@@ -1,4 +1,5 @@
-import 'package:alkaram_hosiery/services/ledger_service.dart';
+import 'package:alkaram_hosiery/services/ledger_service.dart'; // ← NO 'hide' here
+import 'package:alkaram_hosiery/services/ledgerpdf.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -25,7 +26,7 @@ class _C {
 }
 
 class EmployeeLedgerPage extends StatefulWidget {
-  final Employee employee; // ← widened from PerPieceEmployee
+  final Employee employee;
   const EmployeeLedgerPage({super.key, required this.employee});
 
   @override
@@ -36,6 +37,26 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
   final LedgerService _ledgerService = LedgerService();
   final DateFormat _dateFmt = DateFormat('dd MMM yy');
   final DateFormat _timeFmt = DateFormat('hh:mm a');
+  final LedgerPdfService _pdfService = LedgerPdfService(); // ← NEW
+  List<LedgerEntry> _latestEntries = [];
+
+
+  Future<void> _exportPdf() async {
+    if (_latestEntries.isEmpty) {
+      _showSnack('No entries to export', color: _C.amber);
+      return;
+    }
+    try {
+      _showSnack('Generating PDF…', color: _C.blue);
+      await _pdfService.shareOrPrintLedger(
+        employee: widget.employee,
+        entries: _latestEntries,
+      );
+    } catch (e) {
+      _showSnack('PDF error: $e', color: _C.red);
+    }
+  }
+
 
   Future<void> _showAddPaymentSheet() async {
     final amountCtrl = TextEditingController();
@@ -49,8 +70,8 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
       builder: (_) => StatefulBuilder(
         builder: (ctx, setSheetState) {
           return Padding(
-            padding: EdgeInsets.only(
-                bottom: MediaQuery.of(ctx).viewInsets.bottom),
+            padding:
+            EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
             child: Container(
               margin: const EdgeInsets.all(12),
               padding: const EdgeInsets.all(24),
@@ -105,8 +126,8 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
                     controller: amountCtrl,
                     label: 'Amount Paid',
                     prefix: 'Rs',
-                    keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true),
+                    keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
                   ),
                   const SizedBox(height: 12),
                   _sheetField(
@@ -124,8 +145,8 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
                         lastDate: DateTime.now(),
                         builder: (c, child) => Theme(
                           data: Theme.of(c).copyWith(
-                            colorScheme: const ColorScheme.light(
-                                primary: _C.red),
+                            colorScheme:
+                            const ColorScheme.light(primary: _C.red),
                           ),
                           child: child!,
                         ),
@@ -170,20 +191,17 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
                           side: const BorderSide(color: _C.border),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8)),
-                          padding:
-                          const EdgeInsets.symmetric(vertical: 14),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
                         child: const Text('Cancel',
-                            style:
-                            TextStyle(fontWeight: FontWeight.w600)),
+                            style: TextStyle(fontWeight: FontWeight.w600)),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: ElevatedButton(
                         onPressed: () async {
-                          final amount =
-                          double.tryParse(amountCtrl.text);
+                          final amount = double.tryParse(amountCtrl.text);
                           if (amount == null || amount <= 0) {
                             ScaffoldMessenger.of(ctx).showSnackBar(
                               const SnackBar(
@@ -216,13 +234,11 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
                           elevation: 0,
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8)),
-                          padding:
-                          const EdgeInsets.symmetric(vertical: 14),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
                         child: const Text('Record Payment',
                             style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 15)),
+                                fontWeight: FontWeight.w600, fontSize: 15)),
                       ),
                     ),
                   ]),
@@ -247,8 +263,7 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
                 color: _C.textPrimary, fontWeight: FontWeight.w600)),
         content: Text(
           'Delete this ${entry.isCredit ? "credit" : "debit"} entry of Rs ${entry.amount.toStringAsFixed(2)}?',
-          style:
-          const TextStyle(color: _C.textSecondary, fontSize: 14),
+          style: const TextStyle(color: _C.textSecondary, fontSize: 14),
         ),
         actions: [
           TextButton(
@@ -259,8 +274,8 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Delete',
-                style: TextStyle(
-                    color: _C.red, fontWeight: FontWeight.w600)),
+                style:
+                TextStyle(color: _C.red, fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -323,6 +338,8 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
             }
 
             final entries = snapshot.data ?? [];
+            _latestEntries = entries; // ← cache for PDF export
+
             return Column(
               children: [
                 _buildBalanceHeader(entries),
@@ -339,8 +356,7 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
           elevation: 2,
           icon: const Icon(Icons.remove_circle_outline, size: 20),
           label: const Text('Add Payment',
-              style: TextStyle(
-                  fontWeight: FontWeight.w600, fontSize: 14)),
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
         ),
       ),
     );
@@ -369,10 +385,26 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
                   fontSize: 16,
                   fontWeight: FontWeight.w600)),
           const Text('Ledger',
-              style:
-              TextStyle(color: _C.textSecondary, fontSize: 12)),
+              style: TextStyle(color: _C.textSecondary, fontSize: 12)),
         ],
       ),
+      // ── NEW: PDF export button ──────────────────────────────────────────
+      actions: [
+        IconButton(
+          tooltip: 'Export PDF',
+          icon: Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: _C.blueDim,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.picture_as_pdf_outlined,
+                color: _C.blue, size: 18),
+          ),
+          onPressed: _exportPdf,
+        ),
+        const SizedBox(width: 4),
+      ],
     );
   }
 
@@ -424,14 +456,14 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
           ]),
           const SizedBox(height: 12),
           Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 16, vertical: 12),
+            padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               color: isPositive ? _C.greenDim : _C.redDim,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
-                  color: (isPositive ? _C.green : _C.red)
-                      .withOpacity(0.3)),
+                  color:
+                  (isPositive ? _C.green : _C.red).withOpacity(0.3)),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -478,8 +510,7 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
   }) {
     return Expanded(
       child: Container(
-        padding:
-        const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: bgColor,
           borderRadius: BorderRadius.circular(10),
@@ -489,8 +520,7 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
           Container(
             padding: const EdgeInsets.all(5),
             decoration: BoxDecoration(
-                color: color.withOpacity(0.15),
-                shape: BoxShape.circle),
+                color: color.withOpacity(0.15), shape: BoxShape.circle),
             child: Icon(icon, size: 12, color: color),
           ),
           const SizedBox(width: 8),
@@ -523,8 +553,7 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: _C.surfaceElevated,
-        borderRadius:
-        const BorderRadius.vertical(top: Radius.circular(10)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
         border: Border.all(color: _C.border),
       ),
       child: Table(
@@ -538,17 +567,15 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
           6: FixedColumnWidth(36),
         },
         children: [
-          TableRow(
-            children: [
-              _th('#'),
-              _th('Date'),
-              _th('Description'),
-              _th('Credit', color: _C.green),
-              _th('Debit', color: _C.red),
-              _th('Balance'),
-              _th(''),
-            ],
-          ),
+          TableRow(children: [
+            _th('#'),
+            _th('Date'),
+            _th('Description'),
+            _th('Credit', color: _C.green),
+            _th('Debit', color: _C.red),
+            _th('Balance'),
+            _th(''),
+          ]),
         ],
       ),
     );
@@ -588,7 +615,7 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
                     fontWeight: FontWeight.w500)),
             const SizedBox(height: 6),
             const Text(
-                'Credits appear automatically when production is saved.\nUse the button below to record payments.',
+                'Credits appear automatically when salary/production is saved.\nUse the button below to record payments.',
                 style: TextStyle(
                     color: _C.textMuted, fontSize: 13, height: 1.5),
                 textAlign: TextAlign.center),
@@ -614,7 +641,7 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
         color: _C.surface,
         borderRadius:
         const BorderRadius.vertical(bottom: Radius.circular(10)),
-        border: Border(
+        border: const Border(
           left: BorderSide(color: _C.border),
           right: BorderSide(color: _C.border),
           bottom: BorderSide(color: _C.border),
@@ -668,120 +695,118 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
         },
         defaultVerticalAlignment: TableCellVerticalAlignment.middle,
         children: [
-          TableRow(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 6, vertical: 10),
-                child: Text('$rowNumber',
-                    style: const TextStyle(
-                        color: _C.textMuted,
-                        fontSize: 11,
-                        fontFamily: 'Courier')),
+          TableRow(children: [
+            Padding(
+              padding:
+              const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+              child: Text('$rowNumber',
+                  style: const TextStyle(
+                      color: _C.textMuted,
+                      fontSize: 11,
+                      fontFamily: 'Courier')),
+            ),
+            Padding(
+              padding:
+              const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_dateFmt.format(entry.date),
+                      style: const TextStyle(
+                          color: _C.textPrimary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600)),
+                  Text(_timeFmt.format(entry.date),
+                      style:
+                      const TextStyle(color: _C.textMuted, fontSize: 9)),
+                ],
               ),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 6, vertical: 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_dateFmt.format(entry.date),
-                        style: const TextStyle(
-                            color: _C.textPrimary,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600)),
-                    Text(_timeFmt.format(entry.date),
-                        style: const TextStyle(
-                            color: _C.textMuted, fontSize: 9)),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 6, vertical: 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(entry.description,
-                        style: const TextStyle(
-                            color: _C.textPrimary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 3),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: isCredit ? _C.greenDim : _C.redDim,
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(
-                            color: (isCredit ? _C.green : _C.red)
-                                .withOpacity(0.3)),
-                      ),
-                      child: Text(
-                        isCredit ? '▲ Credit' : '▼ Debit',
-                        style: TextStyle(
-                            color: isCredit ? _C.green : _C.red,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700),
-                      ),
+            ),
+            Padding(
+              padding:
+              const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(entry.description,
+                      style: const TextStyle(
+                          color: _C.textPrimary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 3),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: isCredit ? _C.greenDim : _C.redDim,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(
+                          color: (isCredit ? _C.green : _C.red)
+                              .withOpacity(0.3)),
                     ),
-                  ],
-                ),
+                    child: Text(
+                      isCredit ? '▲ Credit' : '▼ Debit',
+                      style: TextStyle(
+                          color: isCredit ? _C.green : _C.red,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
               ),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 6, vertical: 10),
-                child: isCredit
-                    ? Text(entry.amount.toStringAsFixed(2),
-                    style: const TextStyle(
-                        color: _C.green,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        fontFamily: 'Courier'))
-                    : const Text('—',
-                    style: TextStyle(
-                        color: _C.textMuted, fontSize: 12)),
+            ),
+            Padding(
+              padding:
+              const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+              child: isCredit
+                  ? Text(entry.amount.toStringAsFixed(2),
+                  style: const TextStyle(
+                      color: _C.green,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      fontFamily: 'Courier'))
+                  : const Text('—',
+                  style:
+                  TextStyle(color: _C.textMuted, fontSize: 12)),
+            ),
+            Padding(
+              padding:
+              const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+              child: !isCredit
+                  ? Text(entry.amount.toStringAsFixed(2),
+                  style: const TextStyle(
+                      color: _C.red,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      fontFamily: 'Courier'))
+                  : const Text('—',
+                  style:
+                  TextStyle(color: _C.textMuted, fontSize: 12)),
+            ),
+            Padding(
+              padding:
+              const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+              child: Text(balance.toStringAsFixed(2),
+                  style: TextStyle(
+                      color: balancePositive ? _C.green : _C.red,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      fontFamily: 'Courier')),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: IconButton(
+                icon: const Icon(Icons.delete_outline,
+                    size: 15, color: _C.textMuted),
+                onPressed: () => _deleteEntry(entry),
+                padding: EdgeInsets.zero,
+                constraints:
+                const BoxConstraints(minWidth: 28, minHeight: 28),
               ),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 6, vertical: 10),
-                child: !isCredit
-                    ? Text(entry.amount.toStringAsFixed(2),
-                    style: const TextStyle(
-                        color: _C.red,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        fontFamily: 'Courier'))
-                    : const Text('—',
-                    style: TextStyle(
-                        color: _C.textMuted, fontSize: 12)),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 6, vertical: 10),
-                child: Text(balance.toStringAsFixed(2),
-                    style: TextStyle(
-                        color: balancePositive ? _C.green : _C.red,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        fontFamily: 'Courier')),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: IconButton(
-                  icon: const Icon(Icons.delete_outline,
-                      size: 15, color: _C.textMuted),
-                  onPressed: () => _deleteEntry(entry),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                      minWidth: 28, minHeight: 28),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ]),
         ],
       ),
     );
@@ -815,8 +840,7 @@ class _EmployeeLedgerPageState extends State<EmployeeLedgerPage> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(6),
-          borderSide:
-          const BorderSide(color: _C.red, width: 1.5),
+          borderSide: const BorderSide(color: _C.red, width: 1.5),
         ),
         isDense: true,
       ),

@@ -18,13 +18,10 @@ abstract class Employee {
     required this.employeeType,
   });
 
-  // Convert to Map for Realtime Database
   Map<String, dynamic> toMap();
 
-  // Create from Map
   factory Employee.fromMap(String id, Map<String, dynamic> map) {
     final String type = map['employeeType'] ?? '';
-
     switch (type) {
       case 'monthly':
         return MonthlyEmployee.fromMap(id, map);
@@ -70,8 +67,13 @@ abstract class Employee {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+//  Monthly Employee — now tracks daysWorked
+// ─────────────────────────────────────────────────────────────
 class MonthlyEmployee extends Employee {
   final double monthlySalary;
+  final int daysWorked;       // total working days entered so far
+  final int workingDaysInMonth; // denominator for per-day rate (default 26)
 
   MonthlyEmployee({
     required super.id,
@@ -80,7 +82,15 @@ class MonthlyEmployee extends Employee {
     required super.position,
     required super.joiningDate,
     required this.monthlySalary,
+    this.daysWorked = 0,
+    this.workingDaysInMonth = 26,
   }) : super(employeeType: 'monthly');
+
+  /// Per-day rate
+  double get dailyRate => monthlySalary / 30;
+
+  /// Salary earned so far based on days entered
+  double get earnedSalary => dailyRate * daysWorked;
 
   @override
   Map<String, dynamic> toMap() {
@@ -92,6 +102,8 @@ class MonthlyEmployee extends Employee {
       'joiningDate': joiningDate.toIso8601String(),
       'employeeType': 'monthly',
       'monthlySalary': monthlySalary,
+      'daysWorked': daysWorked,
+      'workingDaysInMonth': workingDaysInMonth,
     };
   }
 
@@ -101,12 +113,68 @@ class MonthlyEmployee extends Employee {
       name: map['name'] ?? '',
       phone: map['phone'] ?? '',
       position: map['position'] ?? '',
-      joiningDate: DateTime.parse(map['joiningDate'] ?? DateTime.now().toIso8601String()),
+      joiningDate:
+      DateTime.parse(map['joiningDate'] ?? DateTime.now().toIso8601String()),
       monthlySalary: (map['monthlySalary'] ?? 0).toDouble(),
+      daysWorked: map['daysWorked'] ?? 0,
+      workingDaysInMonth: map['workingDaysInMonth'] ?? 26,
     );
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+//  Monthly Attendance Record (one record per entry)
+// ─────────────────────────────────────────────────────────────
+class MonthlyAttendanceRecord {
+  final String id;
+  final String employeeId;
+  final String employeeName;
+  final int daysAdded;
+  final double dailyRate;
+  final double earnings;
+  final String? notes;
+  final DateTime timestamp;
+
+  MonthlyAttendanceRecord({
+    required this.id,
+    required this.employeeId,
+    required this.employeeName,
+    required this.daysAdded,
+    required this.dailyRate,
+    required this.earnings,
+    this.notes,
+    required this.timestamp,
+  });
+
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'employeeId': employeeId,
+    'employeeName': employeeName,
+    'daysAdded': daysAdded,
+    'dailyRate': dailyRate,
+    'earnings': earnings,
+    if (notes != null) 'notes': notes,
+    'timestamp': timestamp.toIso8601String(),
+  };
+
+  factory MonthlyAttendanceRecord.fromMap(
+      String id, Map<String, dynamic> map) {
+    return MonthlyAttendanceRecord(
+      id: id,
+      employeeId: map['employeeId'] ?? '',
+      employeeName: map['employeeName'] ?? '',
+      daysAdded: map['daysAdded'] ?? 0,
+      dailyRate: (map['dailyRate'] ?? 0).toDouble(),
+      earnings: (map['earnings'] ?? 0).toDouble(),
+      notes: map['notes'],
+      timestamp: DateTime.parse(map['timestamp']),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Daily Employee
+// ─────────────────────────────────────────────────────────────
 class DailyEmployee extends Employee {
   final double dailyRate;
   final int daysWorked;
@@ -144,13 +212,17 @@ class DailyEmployee extends Employee {
       name: map['name'] ?? '',
       phone: map['phone'] ?? '',
       position: map['position'] ?? '',
-      joiningDate: DateTime.parse(map['joiningDate'] ?? DateTime.now().toIso8601String()),
+      joiningDate:
+      DateTime.parse(map['joiningDate'] ?? DateTime.now().toIso8601String()),
       dailyRate: (map['dailyRate'] ?? 0).toDouble(),
       daysWorked: map['daysWorked'] ?? 0,
     );
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+//  Per Piece Employee
+// ─────────────────────────────────────────────────────────────
 class PerPieceEmployee extends Employee {
   final double ratePerPiece;
   final int piecesCompleted;
@@ -188,16 +260,20 @@ class PerPieceEmployee extends Employee {
       name: map['name'] ?? '',
       phone: map['phone'] ?? '',
       position: map['position'] ?? '',
-      joiningDate: DateTime.parse(map['joiningDate'] ?? DateTime.now().toIso8601String()),
+      joiningDate:
+      DateTime.parse(map['joiningDate'] ?? DateTime.now().toIso8601String()),
       ratePerPiece: (map['ratePerPiece'] ?? 0).toDouble(),
       piecesCompleted: map['piecesCompleted'] ?? 0,
     );
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+//  Per Dozen Employee
+// ─────────────────────────────────────────────────────────────
 class PerDozenEmployee extends Employee {
   final double ratePerDozen;
-  final int dozensCompleted; // Could be fractional dozens, but using int for simplicity
+  final int dozensCompleted;
 
   PerDozenEmployee({
     required super.id,
@@ -210,8 +286,6 @@ class PerDozenEmployee extends Employee {
   }) : super(employeeType: 'perdozen');
 
   double get totalEarnings => ratePerDozen * dozensCompleted;
-
-  // Get pieces equivalent (dozens * 12)
   int get totalPieces => dozensCompleted * 12;
 
   @override
@@ -236,7 +310,8 @@ class PerDozenEmployee extends Employee {
       name: map['name'] ?? '',
       phone: map['phone'] ?? '',
       position: map['position'] ?? '',
-      joiningDate: DateTime.parse(map['joiningDate'] ?? DateTime.now().toIso8601String()),
+      joiningDate:
+      DateTime.parse(map['joiningDate'] ?? DateTime.now().toIso8601String()),
       ratePerDozen: (map['ratePerDozen'] ?? 0).toDouble(),
       dozensCompleted: map['dozensCompleted'] ?? 0,
     );
@@ -266,21 +341,20 @@ class PerDozenProductionRecord {
     this.notes,
   });
 
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'employeeId': employeeId,
-      'employeeName': employeeName,
-      'dozens': dozens,
-      'pieces': pieces,
-      'earnings': earnings,
-      'ratePerDozen': ratePerDozen,
-      'timestamp': timestamp.toIso8601String(),
-      if (notes != null) 'notes': notes,
-    };
-  }
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'employeeId': employeeId,
+    'employeeName': employeeName,
+    'dozens': dozens,
+    'pieces': pieces,
+    'earnings': earnings,
+    'ratePerDozen': ratePerDozen,
+    'timestamp': timestamp.toIso8601String(),
+    if (notes != null) 'notes': notes,
+  };
 
-  factory PerDozenProductionRecord.fromMap(String id, Map<String, dynamic> map) {
+  factory PerDozenProductionRecord.fromMap(
+      String id, Map<String, dynamic> map) {
     return PerDozenProductionRecord(
       id: id,
       employeeId: map['employeeId'] ?? '',
@@ -294,3 +368,31 @@ class PerDozenProductionRecord {
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────
+//  Ledger models
+// ─────────────────────────────────────────────────────────────
+enum LedgerEntryType { credit, debit }
+
+extension LedgerEntryTypeExtension on LedgerEntryType {
+  String get value {
+    switch (this) {
+      case LedgerEntryType.credit:
+        return 'credit';
+      case LedgerEntryType.debit:
+        return 'debit';
+    }
+  }
+
+  static LedgerEntryType fromString(String value) {
+    switch (value) {
+      case 'credit':
+        return LedgerEntryType.credit;
+      case 'debit':
+        return LedgerEntryType.debit;
+      default:
+        return LedgerEntryType.credit;
+    }
+  }
+}
+
