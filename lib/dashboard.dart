@@ -4,8 +4,10 @@ import 'package:alkaram_hosiery/vendors/vendorchequepage.dart';
 import 'package:alkaram_hosiery/vendors/viewvendors.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'DailyExpensesPages/viewexpensepage.dart';
 import 'EmployeeManagementPage.dart';
 import 'GodownTransferPage.dart';
+import 'ShopTransferPage.dart';
 import 'itemsManagement.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -29,10 +31,21 @@ class _DashboardPageState extends State<DashboardPage>
     'totalPayments': 0.0, 'pendingCheques': 0,
   };
   Map<String, dynamic> _itemStats   = {'totalItems': 0};
-  Map<String, dynamic> _godownStats = {     // ← NEW
+  Map<String, dynamic> _godownStats = {
     'totalTransfers': 0,
     'totalQty': 0,
     'todayQty': 0,
+  };
+  Map<String, dynamic> _shopStats = {
+    'totalTransfers': 0,
+    'totalQty': 0,
+    'todayQty': 0,
+  };
+  Map<String, dynamic> _expenseStats = {   // ← NEW
+    'todayTotal': 0.0,
+    'todayCount': 0,
+    'openingBalance': 0.0,
+    'remainingBalance': 0.0,
   };
 
   bool _isLoading = true;
@@ -48,6 +61,7 @@ class _DashboardPageState extends State<DashboardPage>
   static const Color _accentGreen   = Color(0xFF66BB6A);
   static const Color _accentPurple  = Color(0xFFAB47BC);
   static const Color _accentBlue    = Color(0xFF42A5F5);
+  static const Color _accentRed     = Color(0xFFEF5350);
   static const Color _textPrimary   = Color(0xFF2C3E50);
   static const Color _textSecondary = Color(0xFF7F8C8D);
   static const Color _borderColor   = Color(0xFFE2E8F0);
@@ -75,14 +89,18 @@ class _DashboardPageState extends State<DashboardPage>
       _databaseService.getStatistics(),
       _loadVendorStats(),
       _loadItemStats(),
-      _loadGodownStats(),   // ← NEW
+      _loadGodownStats(),
+      _loadShopStats(),
+      _loadExpenseStats(),   // ← NEW
     ]);
 
     setState(() {
       _employeeStats = results[0];
       _vendorStats   = results[1];
       _itemStats     = results[2];
-      _godownStats   = results[3];   // ← NEW
+      _godownStats   = results[3];
+      _shopStats     = results[4];
+      _expenseStats  = results[5];   // ← NEW
       _isLoading     = false;
     });
     _fadeController.forward();
@@ -169,7 +187,6 @@ class _DashboardPageState extends State<DashboardPage>
     }
   }
 
-  // ── Godown stats ─────────────────────────────────────────────
   Future<Map<String, dynamic>> _loadGodownStats() async {
     try {
       final snap = await FirebaseDatabase.instance
@@ -209,6 +226,87 @@ class _DashboardPageState extends State<DashboardPage>
     }
   }
 
+  Future<Map<String, dynamic>> _loadShopStats() async {
+    try {
+      final snap = await FirebaseDatabase.instance
+          .ref('shop_transfers').get();
+      if (snap.value == null) {
+        return {'totalTransfers': 0, 'totalQty': 0, 'todayQty': 0};
+      }
+      final data = snap.value as Map<dynamic, dynamic>;
+      int totalTransfers = 0;
+      int totalQty       = 0;
+      int todayQty       = 0;
+      final now = DateTime.now();
+
+      for (final v in data.values) {
+        totalTransfers++;
+        final qty = (v['qty'] ?? 0) is int
+            ? v['qty'] as int
+            : int.tryParse(v['qty'].toString()) ?? 0;
+        totalQty += qty;
+        final dt = DateTime.tryParse(
+            v['transferredAt']?.toString() ?? '');
+        if (dt != null &&
+            dt.year == now.year &&
+            dt.month == now.month &&
+            dt.day == now.day) {
+          todayQty += qty;
+        }
+      }
+      return {
+        'totalTransfers': totalTransfers,
+        'totalQty': totalQty,
+        'todayQty': todayQty,
+      };
+    } catch (e) {
+      debugPrint('Shop stats error: $e');
+      return {'totalTransfers': 0, 'totalQty': 0, 'todayQty': 0};
+    }
+  }
+
+  // ── Expense Stats (today's data) ─────────────────────────────  ← NEW
+  Future<Map<String, dynamic>> _loadExpenseStats() async {
+    try {
+      final now = DateTime.now();
+      final formattedDate =
+          '${now.day.toString().padLeft(2, '0')}:${now.month.toString().padLeft(2, '0')}:${now.year}';
+      final dbRef = FirebaseDatabase.instance.ref('dailyKharcha');
+
+      final results = await Future.wait([
+        dbRef.child('originalOpeningBalance').child(formattedDate).get(),
+        dbRef.child(formattedDate).child('expenses').get(),
+      ]);
+
+      double openingBalance   = 0.0;
+      double todayTotal       = 0.0;
+      int    todayCount       = 0;
+
+      if (results[0].exists) {
+        openingBalance = (results[0].value as num).toDouble();
+      }
+      if (results[1].exists && results[1].value is Map) {
+        for (final v in (results[1].value as Map).values) {
+          todayTotal += (v['amount'] as num? ?? 0).toDouble();
+          todayCount++;
+        }
+      }
+
+      return {
+        'todayTotal':        todayTotal,
+        'todayCount':        todayCount,
+        'openingBalance':    openingBalance,
+        'remainingBalance':  openingBalance - todayTotal,
+      };
+    } catch (e) {
+      debugPrint('Expense stats error: $e');
+      return {
+        'todayTotal': 0.0, 'todayCount': 0,
+        'openingBalance': 0.0, 'remainingBalance': 0.0,
+      };
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────
   //  BUILD
   // ─────────────────────────────────────────────────────────────
@@ -226,17 +324,13 @@ class _DashboardPageState extends State<DashboardPage>
           slivers: [
             _buildSliverAppBar(),
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(
-                  20, 0, 20, 32),
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
                   const SizedBox(height: 24),
 
                   // ── Employee Section ──────────
-                  _buildSectionHeader(
-                      'Employee Management',
-                      Icons.people_outline,
-                      _accentOrange),
+                  _buildSectionHeader('Employee Management', Icons.people_outline, _accentOrange),
                   const SizedBox(height: 16),
                   _buildEmployeeStats(),
                   const SizedBox(height: 16),
@@ -245,10 +339,7 @@ class _DashboardPageState extends State<DashboardPage>
                   const SizedBox(height: 32),
 
                   // ── Vendor Section ────────────
-                  _buildSectionHeader(
-                      'Vendor Management',
-                      Icons.storefront_outlined,
-                      _accentTeal),
+                  _buildSectionHeader('Vendor Management', Icons.storefront_outlined, _accentTeal),
                   const SizedBox(height: 16),
                   _buildVendorStats(),
                   const SizedBox(height: 16),
@@ -257,10 +348,7 @@ class _DashboardPageState extends State<DashboardPage>
                   const SizedBox(height: 32),
 
                   // ── Item Section ──────────────
-                  _buildSectionHeader(
-                      'Item Management',
-                      Icons.inventory_2_outlined,
-                      _accentPurple),
+                  _buildSectionHeader('Item Management', Icons.inventory_2_outlined, _accentPurple),
                   const SizedBox(height: 16),
                   _buildItemStats(),
                   const SizedBox(height: 16),
@@ -268,15 +356,34 @@ class _DashboardPageState extends State<DashboardPage>
 
                   const SizedBox(height: 32),
 
-                  // ── Godown Section ────────────  ← NEW
-                  _buildSectionHeader(
-                      'Godown Transfers',
-                      Icons.local_shipping_outlined,
-                      _accentTeal),
+                  // ── Godown Section ────────────
+                  _buildSectionHeader('Godown Transfers', Icons.local_shipping_outlined, _accentTeal),
                   const SizedBox(height: 16),
                   _buildGodownStats(),
                   const SizedBox(height: 16),
                   _buildGodownActions(),
+
+                  const SizedBox(height: 32),
+
+                  // ── Shop Section ──────────────
+                  _buildSectionHeader('Shop Transfers', Icons.storefront_outlined, _accentPurple),
+                  const SizedBox(height: 16),
+                  _buildShopBanner(),
+                  const SizedBox(height: 12),
+                  _buildShopStats(),
+                  const SizedBox(height: 16),
+                  _buildShopActions(),
+
+                  const SizedBox(height: 32),
+
+                  // ── Daily Expenses Section ────  ← NEW
+                  _buildSectionHeader('Daily Expenses', Icons.account_balance_wallet_outlined, _accentRed),
+                  const SizedBox(height: 16),
+                  _buildExpenseBanner(),
+                  const SizedBox(height: 12),
+                  _buildExpenseStats(),
+                  const SizedBox(height: 16),
+                  _buildExpenseActions(),
 
                   const SizedBox(height: 32),
 
@@ -309,8 +416,7 @@ class _DashboardPageState extends State<DashboardPage>
         background: Container(
           color: _bgSecondary,
           child: Padding(
-            padding:
-            const EdgeInsets.fromLTRB(20, 60, 20, 20),
+            padding: const EdgeInsets.fromLTRB(20, 60, 20, 20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.end,
@@ -319,36 +425,19 @@ class _DashboardPageState extends State<DashboardPage>
                   Container(
                     width: 40, height: 40,
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                          colors: [
-                            _accentOrange,
-                            _accentAmber
-                          ]),
-                      borderRadius:
-                      BorderRadius.circular(10),
+                      gradient: const LinearGradient(colors: [_accentOrange, _accentAmber]),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                     child: const Center(
-                      child: Text('AK',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16)),
+                      child: Text('AK', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
                     ),
                   ),
                   const SizedBox(width: 12),
                   const Column(
-                    crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Al-Karam Hosiery',
-                          style: TextStyle(
-                              color: _textPrimary,
-                              fontSize: 20,
-                              fontWeight: FontWeight.w700)),
-                      Text('Management Dashboard',
-                          style: TextStyle(
-                              color: _textSecondary,
-                              fontSize: 13)),
+                      Text('Al-Karam Hosiery', style: TextStyle(color: _textPrimary, fontSize: 20, fontWeight: FontWeight.w700)),
+                      Text('Management Dashboard', style: TextStyle(color: _textSecondary, fontSize: 13)),
                     ],
                   ),
                 ]),
@@ -360,21 +449,14 @@ class _DashboardPageState extends State<DashboardPage>
       title: Row(children: [
         Container(
           width: 3, height: 18,
-          decoration: BoxDecoration(
-              color: _accentOrange,
-              borderRadius: BorderRadius.circular(2)),
+          decoration: BoxDecoration(color: _accentOrange, borderRadius: BorderRadius.circular(2)),
         ),
         const SizedBox(width: 10),
-        const Text('Dashboard',
-            style: TextStyle(
-                color: _textPrimary,
-                fontSize: 17,
-                fontWeight: FontWeight.w600)),
+        const Text('Dashboard', style: TextStyle(color: _textPrimary, fontSize: 17, fontWeight: FontWeight.w600)),
       ]),
       actions: [
         IconButton(
-          icon: Icon(Icons.refresh_rounded,
-              color: _textSecondary, size: 20),
+          icon: Icon(Icons.refresh_rounded, color: _textSecondary, size: 20),
           onPressed: () {
             setState(() => _isLoading = true);
             _fadeController.reset();
@@ -387,22 +469,15 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   // ── Section Header ───────────────────────────────────────────
-  Widget _buildSectionHeader(
-      String title, IconData icon, Color color) {
+  Widget _buildSectionHeader(String title, IconData icon, Color color) {
     return Row(children: [
       Container(
         padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8)),
+        decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
         child: Icon(icon, color: color, size: 18),
       ),
       const SizedBox(width: 12),
-      Text(title,
-          style: const TextStyle(
-              color: _textPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.w600)),
+      Text(title, style: const TextStyle(color: _textPrimary, fontSize: 16, fontWeight: FontWeight.w600)),
       const Spacer(),
       Container(height: 1, width: 60, color: _borderColor),
     ]);
@@ -411,35 +486,30 @@ class _DashboardPageState extends State<DashboardPage>
   // ── Employee Stats ───────────────────────────────────────────
   Widget _buildEmployeeStats() {
     final stats = [
-      _StatConfig(label: 'Total',     value: _employeeStats['total'].toString(),   icon: Icons.groups,         color: _accentOrange),
-      _StatConfig(label: 'Monthly',   value: _employeeStats['monthly'].toString(), icon: Icons.calendar_month, color: _accentTeal),
-      _StatConfig(label: 'Daily',     value: _employeeStats['daily'].toString(),   icon: Icons.today,          color: _accentGreen),
-      _StatConfig(label: 'Per Piece', value: _employeeStats['perPiece'].toString(),icon: Icons.inventory,      color: _accentPurple),
-      _StatConfig(label: 'Per Dozen', value: (_employeeStats['perDozen'] ?? 0).toString(), icon: Icons.grid_view, color: _accentBlue),
+      _StatConfig(label: 'Total',     value: _employeeStats['total'].toString(),            icon: Icons.groups,         color: _accentOrange),
+      _StatConfig(label: 'Monthly',   value: _employeeStats['monthly'].toString(),          icon: Icons.calendar_month, color: _accentTeal),
+      _StatConfig(label: 'Daily',     value: _employeeStats['daily'].toString(),            icon: Icons.today,          color: _accentGreen),
+      _StatConfig(label: 'Per Piece', value: _employeeStats['perPiece'].toString(),         icon: Icons.inventory,      color: _accentPurple),
+      _StatConfig(label: 'Per Dozen', value: (_employeeStats['perDozen'] ?? 0).toString(), icon: Icons.grid_view,      color: _accentBlue),
     ];
-    final cardWidth =
-        (MediaQuery.of(context).size.width - 40 - 48) / 4;
+    final cardWidth = (MediaQuery.of(context).size.width - 40 - 48) / 4;
     return Wrap(
       spacing: 12,
       runSpacing: 12,
-      children: stats
-          .map((s) => SizedBox(
-          width: cardWidth,
-          child: _buildCompactStatCard(s)))
-          .toList(),
+      children: stats.map((s) => SizedBox(width: cardWidth, child: _buildCompactStatCard(s))).toList(),
     );
   }
 
   // ── Vendor Stats ─────────────────────────────────────────────
   Widget _buildVendorStats() {
     return Row(children: [
-      Expanded(child: _buildInfoCard('Vendors',  _vendorStats['totalVendors'].toString(),   Icons.store,           _accentTeal)),
+      Expanded(child: _buildInfoCard('Vendors',        _vendorStats['totalVendors'].toString(),                             Icons.store,           _accentTeal)),
       const SizedBox(width: 12),
-      Expanded(child: _buildInfoCard('Bills (Rs)', (_vendorStats['totalBills'] as double).toStringAsFixed(0), Icons.receipt, _accentPurple)),
+      Expanded(child: _buildInfoCard('Bills (Rs)',     (_vendorStats['totalBills']    as double).toStringAsFixed(0),        Icons.receipt,         _accentPurple)),
       const SizedBox(width: 12),
-      Expanded(child: _buildInfoCard('Paid (Rs)',  (_vendorStats['totalPayments'] as double).toStringAsFixed(0), Icons.payment, _accentGreen)),
+      Expanded(child: _buildInfoCard('Paid (Rs)',      (_vendorStats['totalPayments'] as double).toStringAsFixed(0),        Icons.payment,         _accentGreen)),
       const SizedBox(width: 12),
-      Expanded(child: _buildInfoCard('Pend. Cheques', _vendorStats['pendingCheques'].toString(), Icons.pending_actions, _accentOrange)),
+      Expanded(child: _buildInfoCard('Pend. Cheques', _vendorStats['pendingCheques'].toString(),                            Icons.pending_actions, _accentOrange)),
     ]);
   }
 
@@ -450,57 +520,195 @@ class _DashboardPageState extends State<DashboardPage>
     ]);
   }
 
-  // ── Godown Stats ─────────────────────────────────────────────  ← NEW
+  // ── Godown Stats ─────────────────────────────────────────────
   Widget _buildGodownStats() {
     return Row(children: [
-      Expanded(child: _buildInfoCard(
-          'Transfers',
-          _godownStats['totalTransfers'].toString(),
-          Icons.swap_horiz,
-          _accentTeal)),
+      Expanded(child: _buildInfoCard('Transfers',  _godownStats['totalTransfers'].toString(), Icons.swap_horiz,  _accentTeal)),
       const SizedBox(width: 12),
-      Expanded(child: _buildInfoCard(
-          'Total Qty',
-          _godownStats['totalQty'].toString(),
-          Icons.inventory_2,
-          _accentPurple)),
+      Expanded(child: _buildInfoCard('Total Qty',  _godownStats['totalQty'].toString(),       Icons.inventory_2, _accentPurple)),
       const SizedBox(width: 12),
-      Expanded(child: _buildInfoCard(
-          "Today's Qty",
-          _godownStats['todayQty'].toString(),
-          Icons.today,
-          _accentGreen)),
+      Expanded(child: _buildInfoCard("Today's Qty", _godownStats['todayQty'].toString(),      Icons.today,       _accentGreen)),
     ]);
   }
 
-  // ── Godown Actions ───────────────────────────────────────────  ← NEW
+  // ── Godown Actions ───────────────────────────────────────────
   Widget _buildGodownActions() {
     final actions = [
-      _ActionConfig(
-          title: 'All Transfers',
-          icon: Icons.list_alt,
-          color: _accentTeal,
-          page: const GodownTransferPage()),
-      _ActionConfig(
-          title: 'New Transfer',
-          icon: Icons.local_shipping,
-          color: _accentGreen,
-          page: const GodownTransferPage()),
-      _ActionConfig(
-          title: 'Reports',
-          icon: Icons.bar_chart,
-          color: _accentPurple,
-          page: const GodownTransferPage()),
+      _ActionConfig(title: 'All Transfers', icon: Icons.list_alt,       color: _accentTeal,   page: const GodownTransferPage()),
+      _ActionConfig(title: 'New Transfer',  icon: Icons.local_shipping,  color: _accentGreen,  page: const GodownTransferPage()),
+      _ActionConfig(title: 'Reports',       icon: Icons.bar_chart,       color: _accentPurple, page: const GodownTransferPage()),
     ];
     return SizedBox(
       height: 70,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: actions.length,
-        separatorBuilder: (_, __) =>
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, i) => _buildCompactActionChip(actions[i]),
+      ),
+    );
+  }
+
+  // ── Shop Banner ──────────────────────────────────────────────
+  Widget _buildShopBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFAB47BC), Color(0xFFCE93D8)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(children: [
+        const Icon(Icons.storefront, color: Colors.white, size: 20),
         const SizedBox(width: 10),
-        itemBuilder: (context, i) =>
-            _buildCompactActionChip(actions[i]),
+        const Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Alkaram Hoseiry Shop', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14)),
+            Text('Godown → Shop stock movements', style: TextStyle(color: Colors.white70, fontSize: 11)),
+          ]),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
+          child: Text('${_shopStats['totalTransfers']} transfers',
+              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+        ),
+      ]),
+    );
+  }
+
+  // ── Shop Stats ───────────────────────────────────────────────
+  Widget _buildShopStats() {
+    return Row(children: [
+      Expanded(child: _buildInfoCard('Transfers',   _shopStats['totalTransfers'].toString(), Icons.swap_horiz,  _accentPurple)),
+      const SizedBox(width: 12),
+      Expanded(child: _buildInfoCard('Total Qty',   _shopStats['totalQty'].toString(),       Icons.inventory_2, _accentBlue)),
+      const SizedBox(width: 12),
+      Expanded(child: _buildInfoCard("Today's Qty", _shopStats['todayQty'].toString(),       Icons.today,       _accentGreen)),
+    ]);
+  }
+
+  // ── Shop Actions ─────────────────────────────────────────────
+  Widget _buildShopActions() {
+    final actions = [
+      _ActionConfig(title: 'All Transfers', icon: Icons.list_alt,   color: _accentPurple, page: const ShopTransferPage()),
+      _ActionConfig(title: 'New Transfer',  icon: Icons.storefront, color: _accentGreen,  page: const ShopTransferPage()),
+      _ActionConfig(title: 'Reports',       icon: Icons.bar_chart,  color: _accentBlue,   page: const ShopTransferPage()),
+    ];
+    return SizedBox(
+      height: 70,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: actions.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, i) => _buildCompactActionChip(actions[i]),
+      ),
+    );
+  }
+
+  // ── Expense Banner ───────────────────────────────────────────  ← NEW
+  Widget _buildExpenseBanner() {
+    final remaining = _expenseStats['remainingBalance'] as double;
+    final isPositive = remaining >= 0;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: isPositive
+              ? [const Color(0xFFEF5350), const Color(0xFFFF8A80)]
+              : [const Color(0xFFEF5350), const Color(0xFFB71C1C)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: _accentRed.withOpacity(0.25), blurRadius: 10, offset: const Offset(0, 4))],
+      ),
+      child: Row(children: [
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), shape: BoxShape.circle),
+          child: const Icon(Icons.account_balance_wallet, color: Colors.white, size: 24),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text("Today's Kharcha", style: TextStyle(color: Colors.white70, fontSize: 12)),
+            Text(
+              'Rs ${(_expenseStats['todayTotal'] as double).toStringAsFixed(2)}',
+              style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
+            ),
+            Text(
+              'Opening: Rs ${(_expenseStats['openingBalance'] as double).toStringAsFixed(2)}',
+              style: const TextStyle(color: Colors.white70, fontSize: 11),
+            ),
+          ]),
+        ),
+        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              '${_expenseStats['todayCount']} items',
+              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Remaining: Rs ${remaining.toStringAsFixed(0)}',
+            style: TextStyle(
+              color: isPositive ? const Color(0xFFA5D6A7) : const Color(0xFFFFCDD2),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ]),
+      ]),
+    );
+  }
+
+  // ── Expense Stats cards ──────────────────────────────────────  ← NEW
+  Widget _buildExpenseStats() {
+    return Row(children: [
+      Expanded(child: _buildInfoCard(
+          "Today's Expense",
+          'Rs ${(_expenseStats['todayTotal'] as double).toStringAsFixed(0)}',
+          Icons.trending_down,
+          _accentRed)),
+      const SizedBox(width: 12),
+      Expanded(child: _buildInfoCard(
+          'Opening Bal.',
+          'Rs ${(_expenseStats['openingBalance'] as double).toStringAsFixed(0)}',
+          Icons.account_balance_wallet,
+          _accentOrange)),
+      const SizedBox(width: 12),
+      Expanded(child: _buildInfoCard(
+          'Remaining',
+          'Rs ${(_expenseStats['remainingBalance'] as double).toStringAsFixed(0)}',
+          Icons.savings,
+          _accentGreen)),
+    ]);
+  }
+
+  // ── Expense Actions ──────────────────────────────────────────  ← NEW
+  Widget _buildExpenseActions() {
+    final actions = [
+      _ActionConfig(title: 'View Expenses', icon: Icons.receipt_long,            color: _accentRed,    page: ViewExpensesPage()),
+      _ActionConfig(title: 'Add Expense',   icon: Icons.add_circle_outline,      color: _accentOrange, page: ViewExpensesPage()),
+      _ActionConfig(title: 'Print Report',  icon: Icons.picture_as_pdf_outlined, color: _accentBlue,   page: ViewExpensesPage()),
+    ];
+    return SizedBox(
+      height: 70,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: actions.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, i) => _buildCompactActionChip(actions[i]),
       ),
     );
   }
@@ -516,10 +724,8 @@ class _DashboardPageState extends State<DashboardPage>
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: actions.length,
-        separatorBuilder: (_, __) =>
-        const SizedBox(width: 10),
-        itemBuilder: (context, i) =>
-            _buildCompactActionChip(actions[i]),
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, i) => _buildCompactActionChip(actions[i]),
       ),
     );
   }
@@ -537,18 +743,15 @@ class _DashboardPageState extends State<DashboardPage>
       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         Icon(stat.icon, color: stat.color, size: 20),
         const SizedBox(height: 8),
-        Text(stat.value,
-            style: TextStyle(color: stat.color, fontSize: 18, fontWeight: FontWeight.w700)),
+        Text(stat.value, style: TextStyle(color: stat.color, fontSize: 18, fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),
-        Text(stat.label,
-            style: const TextStyle(color: _textSecondary, fontSize: 11)),
+        Text(stat.label, style: const TextStyle(color: _textSecondary, fontSize: 11)),
       ]),
     );
   }
 
   // ── Info card ────────────────────────────────────────────────
-  Widget _buildInfoCard(
-      String label, String value, IconData icon, Color color) {
+  Widget _buildInfoCard(String label, String value, IconData icon, Color color) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -560,12 +763,9 @@ class _DashboardPageState extends State<DashboardPage>
       child: Column(children: [
         Icon(icon, color: color, size: 20),
         const SizedBox(height: 8),
-        Text(value,
-            style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.w700)),
+        Text(value, style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),
-        Text(label,
-            style: const TextStyle(color: _textSecondary, fontSize: 10),
-            textAlign: TextAlign.center),
+        Text(label, style: const TextStyle(color: _textSecondary, fontSize: 10), textAlign: TextAlign.center),
       ]),
     );
   }
@@ -583,10 +783,8 @@ class _DashboardPageState extends State<DashboardPage>
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: actions.length,
-        separatorBuilder: (_, __) =>
-        const SizedBox(width: 10),
-        itemBuilder: (context, i) =>
-            _buildCompactActionChip(actions[i]),
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, i) => _buildCompactActionChip(actions[i]),
       ),
     );
   }
@@ -594,20 +792,18 @@ class _DashboardPageState extends State<DashboardPage>
   // ── Vendor Actions ───────────────────────────────────────────
   Widget _buildVendorActions() {
     final actions = [
-      _ActionConfig(title: 'View Vendors',    icon: Icons.store,         color: _accentTeal,   page: const ViewVendorsPage()),
-      _ActionConfig(title: 'Add Vendor',      icon: Icons.add_business,  color: _accentGreen,  page: const AddVendorPage()),
-      _ActionConfig(title: 'Pending Cheques', icon: Icons.pending,       color: _accentOrange, page: const VendorChequesPage()),
-      _ActionConfig(title: 'All Bills',       icon: Icons.receipt_long,  color: _accentPurple, page: null),
+      _ActionConfig(title: 'View Vendors',    icon: Icons.store,        color: _accentTeal,   page: const ViewVendorsPage()),
+      _ActionConfig(title: 'Add Vendor',      icon: Icons.add_business, color: _accentGreen,  page: const AddVendorPage()),
+      _ActionConfig(title: 'Pending Cheques', icon: Icons.pending,      color: _accentOrange, page: const VendorChequesPage()),
+      _ActionConfig(title: 'All Bills',       icon: Icons.receipt_long, color: _accentPurple, page: null),
     ];
     return SizedBox(
       height: 70,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: actions.length,
-        separatorBuilder: (_, __) =>
-        const SizedBox(width: 10),
-        itemBuilder: (context, i) =>
-            _buildCompactActionChip(actions[i]),
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, i) => _buildCompactActionChip(actions[i]),
       ),
     );
   }
@@ -620,12 +816,10 @@ class _DashboardPageState extends State<DashboardPage>
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: action.page != null
-            ? () => Navigator.push(context,
-            MaterialPageRoute(builder: (_) => action.page!))
+            ? () => Navigator.push(context, MaterialPageRoute(builder: (_) => action.page!))
             : null,
         child: Container(
-          padding: const EdgeInsets.symmetric(
-              horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: _borderColor),
@@ -634,11 +828,7 @@ class _DashboardPageState extends State<DashboardPage>
           child: Row(children: [
             Icon(action.icon, color: action.color, size: 18),
             const SizedBox(width: 8),
-            Text(action.title,
-                style: const TextStyle(
-                    color: _textPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500)),
+            Text(action.title, style: const TextStyle(color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w500)),
           ]),
         ),
       ),
@@ -662,59 +852,54 @@ class _DashboardPageState extends State<DashboardPage>
         Row(children: [
           Container(
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-                color: _accentOrange.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10)),
-            child: const Icon(Icons.analytics,
-                color: _accentOrange),
+            decoration: BoxDecoration(color: _accentOrange.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
+            child: const Icon(Icons.analytics, color: _accentOrange),
           ),
           const SizedBox(width: 12),
-          const Text('Financial Summary',
-              style: TextStyle(
-                  color: _textPrimary,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600)),
+          const Text('Financial Summary', style: TextStyle(color: _textPrimary, fontSize: 16, fontWeight: FontWeight.w600)),
         ]),
         const SizedBox(height: 20),
 
         Row(children: [
-          Expanded(child: _buildSummaryItem('Total Employees',     _employeeStats['total'].toString(),  Icons.people,       _accentOrange)),
-          Expanded(child: _buildSummaryItem('Total Vendors',       _vendorStats['totalVendors'].toString(), Icons.store,    _accentTeal)),
+          Expanded(child: _buildSummaryItem('Total Employees', _employeeStats['total'].toString(),        Icons.people,  _accentOrange)),
+          Expanded(child: _buildSummaryItem('Total Vendors',   _vendorStats['totalVendors'].toString(),   Icons.store,   _accentTeal)),
         ]),
         const SizedBox(height: 16),
         Row(children: [
-          Expanded(child: _buildSummaryItem('Total Bills',    'Rs ${(_vendorStats['totalBills'] as double).toStringAsFixed(0)}',    Icons.receipt, _accentPurple)),
-          Expanded(child: _buildSummaryItem('Total Paid',     'Rs ${(_vendorStats['totalPayments'] as double).toStringAsFixed(0)}', Icons.payment, _accentGreen)),
+          Expanded(child: _buildSummaryItem('Total Bills', 'Rs ${(_vendorStats['totalBills']    as double).toStringAsFixed(0)}', Icons.receipt, _accentPurple)),
+          Expanded(child: _buildSummaryItem('Total Paid',  'Rs ${(_vendorStats['totalPayments'] as double).toStringAsFixed(0)}', Icons.payment, _accentGreen)),
         ]),
         const SizedBox(height: 16),
         Row(children: [
-          Expanded(child: _buildSummaryItem('Total Items',       _itemStats['totalItems'].toString(),           Icons.inventory_2,    _accentBlue)),
-          Expanded(child: _buildSummaryItem('Godown Transfers',  _godownStats['totalTransfers'].toString(),     Icons.local_shipping, _accentTeal)),   // ← NEW
+          Expanded(child: _buildSummaryItem('Total Items',      _itemStats['totalItems'].toString(),       Icons.inventory_2,    _accentBlue)),
+          Expanded(child: _buildSummaryItem('Godown Transfers', _godownStats['totalTransfers'].toString(), Icons.local_shipping, _accentTeal)),
+        ]),
+        const SizedBox(height: 16),
+        Row(children: [
+          Expanded(child: _buildSummaryItem('Shop Transfers', _shopStats['totalTransfers'].toString(),                              Icons.storefront,            _accentPurple)),
+          Expanded(child: _buildSummaryItem('Shop Total Qty', _shopStats['totalQty'].toString(),                                    Icons.inventory_2,           _accentBlue)),
+        ]),
+        const SizedBox(height: 16),
+        Row(children: [   // ← NEW expense summary row
+          Expanded(child: _buildSummaryItem("Today's Expense", 'Rs ${(_expenseStats['todayTotal'] as double).toStringAsFixed(0)}',     Icons.trending_down,         _accentRed)),
+          Expanded(child: _buildSummaryItem('Remaining Bal.',  'Rs ${(_expenseStats['remainingBalance'] as double).toStringAsFixed(0)}', Icons.account_balance_wallet, _accentGreen)),
         ]),
         const SizedBox(height: 16),
 
-        // Outstanding balance
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: outstanding >= 0
-                ? _accentOrange.withOpacity(0.1)
-                : _accentGreen.withOpacity(0.1),
+            color: outstanding >= 0 ? _accentOrange.withOpacity(0.1) : _accentGreen.withOpacity(0.1),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Outstanding Balance',
-                  style: TextStyle(
-                      color: _textSecondary,
-                      fontWeight: FontWeight.w500)),
+              const Text('Outstanding Balance', style: TextStyle(color: _textSecondary, fontWeight: FontWeight.w500)),
               Text(
                 'Rs ${outstanding.toStringAsFixed(2)}',
                 style: TextStyle(
-                    color: outstanding >= 0
-                        ? _accentOrange
-                        : _accentGreen,
+                    color: outstanding >= 0 ? _accentOrange : _accentGreen,
                     fontSize: 18,
                     fontWeight: FontWeight.bold),
               ),
@@ -725,20 +910,13 @@ class _DashboardPageState extends State<DashboardPage>
     );
   }
 
-  Widget _buildSummaryItem(
-      String label, String value, IconData icon, Color color) {
+  Widget _buildSummaryItem(String label, String value, IconData icon, Color color) {
     return Row(children: [
       Icon(icon, color: color, size: 16),
       const SizedBox(width: 8),
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label,
-            style: const TextStyle(
-                color: _textSecondary, fontSize: 11)),
-        Text(value,
-            style: const TextStyle(
-                color: _textPrimary,
-                fontSize: 14,
-                fontWeight: FontWeight.w600)),
+        Text(label, style: const TextStyle(color: _textSecondary, fontSize: 11)),
+        Text(value, style: const TextStyle(color: _textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
       ]),
     ]);
   }

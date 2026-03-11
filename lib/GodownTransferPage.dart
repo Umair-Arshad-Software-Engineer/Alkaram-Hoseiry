@@ -1,5 +1,9 @@
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 // ─────────────────────────────────────────────────────────────
 //  Design Tokens
@@ -66,10 +70,10 @@ class _TransferRow {
   final TextEditingController qtyCtrl;
   final TextEditingController noteCtrl;
 
-  _TransferRow()
-      : itemCtrl = TextEditingController(),
-        qtyCtrl  = TextEditingController(),
-        noteCtrl = TextEditingController();
+  _TransferRow({String item = '', String qty = '', String note = ''})
+      : itemCtrl = TextEditingController(text: item),
+        qtyCtrl  = TextEditingController(text: qty),
+        noteCtrl = TextEditingController(text: note);
 
   void dispose() {
     itemCtrl.dispose();
@@ -140,8 +144,7 @@ class _GodownTransferPageState extends State<GodownTransferPage>
           } catch (_) {}
         }
       }
-      transfers.sort(
-              (a, b) => b.transferredAt.compareTo(a.transferredAt));
+      transfers.sort((a, b) => b.transferredAt.compareTo(a.transferredAt));
 
       final List<String> names = [];
       if (results[1].value != null && results[1].value is Map) {
@@ -197,9 +200,16 @@ class _GodownTransferPageState extends State<GodownTransferPage>
     _filtered     = _applyFilters(_allTransfers);
   });
 
-  // ── Add Dialog — table layout ────────────────────────────────
-  Future<void> _showAddDialog() async {
-    final rows     = List.generate(3, (_) => _TransferRow());
+  // ── Add / Edit Dialog — table layout ────────────────────────
+  Future<void> _showAddDialog({GodownTransfer? editing}) async {
+    final isEdit = editing != null;
+    final rows = isEdit
+        ? [_TransferRow(
+      item: editing.itemName,
+      qty:  editing.qty.toString(),
+      note: editing.note,
+    )]
+        : List.generate(3, (_) => _TransferRow());
     final noteCtrl = TextEditingController();
 
     await showDialog(
@@ -208,7 +218,6 @@ class _GodownTransferPageState extends State<GodownTransferPage>
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) {
 
-          // Compact inline text field for table cells
           Widget cell(
               TextEditingController ctrl,
               String hint, {
@@ -218,52 +227,37 @@ class _GodownTransferPageState extends State<GodownTransferPage>
               TextField(
                 controller: ctrl,
                 focusNode: focusNode,
-                keyboardType: numeric
-                    ? TextInputType.number
-                    : TextInputType.text,
-                style: const TextStyle(
-                    color: _C.textPrimary, fontSize: 12),
+                keyboardType: numeric ? TextInputType.number : TextInputType.text,
+                style: const TextStyle(color: _C.textPrimary, fontSize: 12),
                 decoration: InputDecoration(
                   hintText: hint,
-                  hintStyle: const TextStyle(
-                      color: _C.textSecondary, fontSize: 11),
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 8),
+                  hintStyle: const TextStyle(color: _C.textSecondary, fontSize: 11),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                   isDense: true,
                   filled: true,
                   fillColor: Colors.white,
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(7),
-                      borderSide:
-                      const BorderSide(color: _C.border)),
+                      borderSide: const BorderSide(color: _C.border)),
                   enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(7),
-                      borderSide:
-                      const BorderSide(color: _C.border)),
+                      borderSide: const BorderSide(color: _C.border)),
                   focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(7),
-                      borderSide: const BorderSide(
-                          color: _C.accentTeal, width: 1.2)),
+                      borderSide: const BorderSide(color: _C.accentTeal, width: 1.2)),
                 ),
               );
 
-          // One data row
           Widget dataRow(int index, _TransferRow row) =>
               Container(
                 decoration: BoxDecoration(
-                  color: index.isEven
-                      ? Colors.white
-                      : _C.bgPrimary,
-                  border: const Border(
-                      top: BorderSide(color: _C.border)),
+                  color: index.isEven ? Colors.white : _C.bgPrimary,
+                  border: const Border(top: BorderSide(color: _C.border)),
                 ),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                 child: Row(
-                  crossAxisAlignment:
-                  CrossAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Row number
                     SizedBox(
                       width: 24,
                       child: Text('${index + 1}',
@@ -274,120 +268,85 @@ class _GodownTransferPageState extends State<GodownTransferPage>
                               fontWeight: FontWeight.w600)),
                     ),
                     const SizedBox(width: 6),
-
-                    // Item — autocomplete
                     Expanded(
                       flex: 4,
                       child: Autocomplete<String>(
                         optionsBuilder: (v) => _itemNames
-                            .where((n) => n.toLowerCase()
-                            .contains(v.text.toLowerCase()))
+                            .where((n) => n.toLowerCase().contains(v.text.toLowerCase()))
                             .toList(),
                         onSelected: (s) {
                           row.itemCtrl.text = s;
                           setS(() {});
                         },
-                        fieldViewBuilder:
-                            (ctx2, autoCtrl, fn, onSubmit) {
+                        fieldViewBuilder: (ctx2, autoCtrl, fn, onSubmit) {
                           autoCtrl.text = row.itemCtrl.text;
-                          autoCtrl.addListener(
-                                  () => row.itemCtrl.text =
-                                  autoCtrl.text);
-                          return cell(autoCtrl, 'Item name',
-                              focusNode: fn);
+                          autoCtrl.addListener(() => row.itemCtrl.text = autoCtrl.text);
+                          return cell(autoCtrl, 'Item name', focusNode: fn);
                         },
                       ),
                     ),
                     const SizedBox(width: 6),
-
-                    // Qty
-                    Expanded(
-                        flex: 2,
-                        child: cell(row.qtyCtrl, 'Qty',
-                            numeric: true)),
+                    Expanded(flex: 2, child: cell(row.qtyCtrl, 'Qty', numeric: true)),
                     const SizedBox(width: 6),
-
-                    // Row note
-                    Expanded(
-                        flex: 3,
-                        child: cell(row.noteCtrl, 'Note')),
+                    Expanded(flex: 3, child: cell(row.noteCtrl, 'Note')),
                     const SizedBox(width: 4),
-
-                    // Remove row
-                    GestureDetector(
-                      onTap: rows.length > 1
-                          ? () => setS(
-                              () => rows.removeAt(index))
-                          : null,
-                      child: Icon(
-                          Icons.remove_circle_outline,
-                          size: 18,
-                          color: rows.length > 1
-                              ? _C.accentRed
-                              : _C.border),
-                    ),
+                    if (!isEdit)
+                      GestureDetector(
+                        onTap: rows.length > 1 ? () => setS(() => rows.removeAt(index)) : null,
+                        child: Icon(Icons.remove_circle_outline,
+                            size: 18,
+                            color: rows.length > 1 ? _C.accentRed : _C.border),
+                      )
+                    else
+                      const SizedBox(width: 18),
                   ],
                 ),
               );
 
-          // Live count of non-empty rows
-          final validCount =
-              rows.where((r) => !r.isEmpty).length;
+          final validCount = rows.where((r) => !r.isEmpty).length;
 
           return Dialog(
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20)),
-            insetPadding: const EdgeInsets.symmetric(
-                horizontal: 14, vertical: 28),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 28),
             child: Container(
               constraints: const BoxConstraints(maxWidth: 700),
               decoration: BoxDecoration(
-                  color: _C.bgCard,
-                  borderRadius: BorderRadius.circular(20)),
+                  color: _C.bgCard, borderRadius: BorderRadius.circular(20)),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-
-                  // ── Teal header ───────────────────────────
+                  // ── Header ───────────────────────────────────
                   Container(
-                    padding: const EdgeInsets.fromLTRB(
-                        20, 18, 12, 14),
-                    decoration: const BoxDecoration(
+                    padding: const EdgeInsets.fromLTRB(20, 18, 12, 14),
+                    decoration: BoxDecoration(
                       gradient: LinearGradient(
-                        colors: [
-                          _C.accentTeal,
-                          Color(0xFF80CBC4)
-                        ],
+                        colors: isEdit
+                            ? [_C.accentAmber, const Color(0xFFFFE082)]
+                            : [_C.accentTeal, const Color(0xFF80CBC4)],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
-                      borderRadius: BorderRadius.vertical(
-                          top: Radius.circular(20)),
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
                     ),
                     child: Row(children: [
-                      const Icon(Icons.local_shipping,
+                      Icon(isEdit ? Icons.edit : Icons.local_shipping,
                           color: Colors.white, size: 20),
                       const SizedBox(width: 10),
-                      const Column(
-                        crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Factory → Godown',
-                              style: TextStyle(
+                          Text(isEdit ? 'Edit Transfer' : 'Factory → Godown',
+                              style: const TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w700,
                                   fontSize: 16)),
-                          Text(
-                              'Fill rows — leave blank to skip',
-                              style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 11)),
+                          Text(isEdit ? 'Update the transfer details' : 'Fill rows — leave blank to skip',
+                              style: const TextStyle(color: Colors.white70, fontSize: 11)),
                         ],
                       ),
                       const Spacer(),
                       IconButton(
-                        icon: const Icon(Icons.close,
-                            color: Colors.white, size: 20),
+                        icon: const Icon(Icons.close, color: Colors.white, size: 20),
                         onPressed: () {
                           for (final r in rows) r.dispose();
                           noteCtrl.dispose();
@@ -397,190 +356,115 @@ class _GodownTransferPageState extends State<GodownTransferPage>
                     ]),
                   ),
 
-                  // ── Scrollable body ────────────────────────
+                  // ── Body ────────────────────────────────────
                   Flexible(
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(
-                          12, 14, 12, 0),
+                      padding: const EdgeInsets.fromLTRB(12, 14, 12, 0),
                       child: Column(
-                        crossAxisAlignment:
-                        CrossAxisAlignment.stretch,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-
-                          // ── Table ─────────────────────────
                           Container(
                             decoration: BoxDecoration(
-                                border: Border.all(
-                                    color: _C.border),
-                                borderRadius:
-                                BorderRadius.circular(12)),
+                                border: Border.all(color: _C.border),
+                                borderRadius: BorderRadius.circular(12)),
                             child: ClipRRect(
-                              borderRadius:
-                              BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(12),
                               child: Column(children: [
-
-                                // Header row
                                 Container(
-                                  color: const Color(
-                                      0xFFE0F2F1),
-                                  padding:
-                                  const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 9),
+                                  color: const Color(0xFFE0F2F1),
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
                                   child: Row(children: [
-                                    // # column
                                     const SizedBox(width: 24),
                                     const SizedBox(width: 6),
-                                    _hCell('Item Name',
-                                        flex: 4),
+                                    _hCell('Item Name', flex: 4),
                                     const SizedBox(width: 6),
-                                    _hCell('Qty',
-                                        flex: 2,
-                                        align: TextAlign
-                                            .center),
+                                    _hCell('Qty', flex: 2, align: TextAlign.center),
                                     const SizedBox(width: 6),
-                                    _hCell('Row Note',
-                                        flex: 3),
-                                    // space for delete icon
+                                    _hCell('Row Note', flex: 3),
                                     const SizedBox(width: 22),
                                   ]),
                                 ),
-
-                                // Data rows
-                                ...rows
-                                    .asMap()
-                                    .entries
-                                    .map((e) => dataRow(
-                                    e.key, e.value)),
-
-                                // ＋ Add row
-                                GestureDetector(
-                                  onTap: () => setS(() =>
-                                      rows.add(
-                                          _TransferRow())),
-                                  child: Container(
-                                    color: _C.bgPrimary,
-                                    padding:
-                                    const EdgeInsets.symmetric(
-                                        vertical: 10),
-                                    child: Row(
-                                      mainAxisAlignment:
-                                      MainAxisAlignment
-                                          .center,
-                                      children: [
-                                        Icon(
-                                            Icons
-                                                .add_circle_outline,
-                                            color: _C
-                                                .accentTeal
-                                                .withOpacity(
-                                                0.7),
-                                            size: 16),
-                                        const SizedBox(
-                                            width: 6),
-                                        Text('Add Row',
-                                            style: TextStyle(
-                                                color: _C
-                                                    .accentTeal
-                                                    .withOpacity(
-                                                    0.8),
-                                                fontSize: 12,
-                                                fontWeight:
-                                                FontWeight
-                                                    .w600)),
-                                      ],
+                                ...rows.asMap().entries.map((e) => dataRow(e.key, e.value)),
+                                if (!isEdit)
+                                  GestureDetector(
+                                    onTap: () => setS(() => rows.add(_TransferRow())),
+                                    child: Container(
+                                      color: _C.bgPrimary,
+                                      padding: const EdgeInsets.symmetric(vertical: 10),
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(Icons.add_circle_outline,
+                                              color: _C.accentTeal.withOpacity(0.7), size: 16),
+                                          const SizedBox(width: 6),
+                                          Text('Add Row',
+                                              style: TextStyle(
+                                                  color: _C.accentTeal.withOpacity(0.8),
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600)),
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                ),
                               ]),
                             ),
                           ),
 
                           const SizedBox(height: 12),
 
-                          // Shared transfer note
-                          TextField(
-                            controller: noteCtrl,
-                            maxLines: 2,
-                            style: const TextStyle(
-                                color: _C.textPrimary,
-                                fontSize: 13),
-                            decoration: InputDecoration(
-                              labelText:
-                              'Transfer Note (optional — applies to all)',
-                              labelStyle: const TextStyle(
-                                  color: _C.textSecondary,
-                                  fontSize: 12),
-                              prefixIcon: const Icon(
-                                  Icons.note_outlined,
-                                  color: _C.accentTeal,
-                                  size: 18),
-                              contentPadding:
-                              const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 12),
-                              filled: true,
-                              fillColor: _C.bgPrimary,
-                              border: OutlineInputBorder(
-                                  borderRadius:
-                                  BorderRadius.circular(
-                                      10),
-                                  borderSide: const BorderSide(
-                                      color: _C.border)),
-                              enabledBorder: OutlineInputBorder(
-                                  borderRadius:
-                                  BorderRadius.circular(
-                                      10),
-                                  borderSide: const BorderSide(
-                                      color: _C.border)),
-                              focusedBorder: OutlineInputBorder(
-                                  borderRadius:
-                                  BorderRadius.circular(
-                                      10),
-                                  borderSide: const BorderSide(
-                                      color: _C.accentTeal,
-                                      width: 1.5)),
+                          if (!isEdit)
+                            TextField(
+                              controller: noteCtrl,
+                              maxLines: 2,
+                              style: const TextStyle(color: _C.textPrimary, fontSize: 13),
+                              decoration: InputDecoration(
+                                labelText: 'Transfer Note (optional — applies to all)',
+                                labelStyle: const TextStyle(color: _C.textSecondary, fontSize: 12),
+                                prefixIcon: const Icon(Icons.note_outlined, color: _C.accentTeal, size: 18),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                filled: true,
+                                fillColor: _C.bgPrimary,
+                                border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: const BorderSide(color: _C.border)),
+                                enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: const BorderSide(color: _C.border)),
+                                focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: const BorderSide(color: _C.accentTeal, width: 1.5)),
+                              ),
                             ),
-                          ),
 
                           const SizedBox(height: 8),
 
-                          // Row count badge
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: Container(
-                              padding:
-                              const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 4),
-                              decoration: BoxDecoration(
-                                color: _C.accentTeal
-                                    .withOpacity(0.08),
-                                borderRadius:
-                                BorderRadius.circular(6),
-                                border: Border.all(
-                                    color: _C.accentTeal
-                                        .withOpacity(0.2)),
-                              ),
-                              child: Text(
-                                '$validCount / ${rows.length} row${rows.length == 1 ? '' : 's'} filled',
-                                style: const TextStyle(
-                                    color: _C.accentTeal,
-                                    fontSize: 11,
-                                    fontWeight:
-                                    FontWeight.w600),
+                          if (!isEdit)
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: _C.accentTeal.withOpacity(0.08),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: _C.accentTeal.withOpacity(0.2)),
+                                ),
+                                child: Text(
+                                  '$validCount / ${rows.length} row${rows.length == 1 ? '' : 's'} filled',
+                                  style: const TextStyle(
+                                      color: _C.accentTeal,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600),
+                                ),
                               ),
                             ),
-                          ),
                         ],
                       ),
                     ),
                   ),
 
-                  // ── Footer buttons ─────────────────────────
+                  // ── Footer ──────────────────────────────────
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                        16, 10, 16, 16),
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
                     child: Row(children: [
                       Expanded(
                         child: OutlinedButton(
@@ -590,20 +474,11 @@ class _GodownTransferPageState extends State<GodownTransferPage>
                             Navigator.pop(ctx);
                           },
                           style: OutlinedButton.styleFrom(
-                            side: const BorderSide(
-                                color: _C.border),
-                            shape: RoundedRectangleBorder(
-                                borderRadius:
-                                BorderRadius.circular(
-                                    10)),
-                            padding:
-                            const EdgeInsets.symmetric(
-                                vertical: 13),
+                            side: const BorderSide(color: _C.border),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            padding: const EdgeInsets.symmetric(vertical: 13),
                           ),
-                          child: const Text('Cancel',
-                              style: TextStyle(
-                                  color:
-                                  _C.textSecondary)),
+                          child: const Text('Cancel', style: TextStyle(color: _C.textSecondary)),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -611,122 +486,102 @@ class _GodownTransferPageState extends State<GodownTransferPage>
                         flex: 2,
                         child: ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: _C.accentTeal,
+                            backgroundColor: isEdit ? _C.accentAmber : _C.accentTeal,
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                                borderRadius:
-                                BorderRadius.circular(
-                                    10)),
-                            padding:
-                            const EdgeInsets.symmetric(
-                                vertical: 13),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            padding: const EdgeInsets.symmetric(vertical: 13),
                             elevation: 0,
                           ),
-                          icon: const Icon(Icons.check,
-                              size: 18),
+                          icon: Icon(isEdit ? Icons.save : Icons.check, size: 18),
                           label: Text(
-                            'Save $validCount Transfer${validCount == 1 ? '' : 's'}',
-                            style: const TextStyle(
-                                fontWeight:
-                                FontWeight.w600),
+                            isEdit
+                                ? 'Update Transfer'
+                                : 'Save $validCount Transfer${validCount == 1 ? '' : 's'}',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
                           onPressed: () async {
-                            // Collect & validate filled rows
                             final valid = <_TransferRow>[];
-                            for (int i = 0;
-                            i < rows.length;
-                            i++) {
+                            for (int i = 0; i < rows.length; i++) {
                               final r = rows[i];
                               if (r.isEmpty) continue;
-                              if (r.itemCtrl.text
-                                  .trim()
-                                  .isEmpty) {
-                                _snack(
-                                    'Row ${i + 1}: Item name required',
-                                    color: _C.accentRed);
+                              if (r.itemCtrl.text.trim().isEmpty) {
+                                _snack('Row ${i + 1}: Item name required', color: _C.accentRed);
                                 return;
                               }
-                              final qty = int.tryParse(
-                                  r.qtyCtrl.text
-                                      .trim()) ??
-                                  0;
+                              final qty = int.tryParse(r.qtyCtrl.text.trim()) ?? 0;
                               if (qty <= 0) {
-                                _snack(
-                                    'Row ${i + 1}: Enter valid quantity',
-                                    color: _C.accentRed);
+                                _snack('Row ${i + 1}: Enter valid quantity', color: _C.accentRed);
                                 return;
                               }
                               valid.add(r);
                             }
                             if (valid.isEmpty) {
-                              _snack(
-                                  'Fill at least one row',
-                                  color: _C.accentRed);
+                              _snack('Fill at least one row', color: _C.accentRed);
                               return;
                             }
 
-                            final sharedNote =
-                            noteCtrl.text.trim();
+                            final sharedNote = noteCtrl.text.trim();
                             Navigator.pop(ctx);
                             _showSavingOverlay();
 
                             try {
-                              final now = DateTime.now();
-                              final List<GodownTransfer>
-                              saved = [];
-
-                              for (final r in valid) {
-                                final rowNote = r.noteCtrl
-                                    .text
-                                    .trim();
-                                final t = GodownTransfer(
-                                  id: '',
-                                  itemName: r.itemCtrl.text
-                                      .trim(),
-                                  qty: int.parse(r.qtyCtrl
-                                      .text
-                                      .trim()),
-                                  note: rowNote.isNotEmpty
-                                      ? rowNote
-                                      : sharedNote,
-                                  transferredAt: now,
+                              if (isEdit) {
+                                // ── UPDATE ──
+                                final r = valid.first;
+                                final updated = GodownTransfer(
+                                  id:            editing!.id,
+                                  itemName:      r.itemCtrl.text.trim(),
+                                  qty:           int.parse(r.qtyCtrl.text.trim()),
+                                  note:          r.noteCtrl.text.trim(),
+                                  transferredAt: editing.transferredAt,
                                 );
-                                final ref =
-                                await _transfersRef
-                                    .push();
-                                await ref.set(t.toMap());
-                                saved.add(GodownTransfer(
-                                  id: ref.key!,
-                                  itemName: t.itemName,
-                                  qty: t.qty,
-                                  note: t.note,
-                                  transferredAt:
-                                  t.transferredAt,
-                                ));
+                                await _transfersRef.child(editing.id).update(updated.toMap());
+                                final idx = _allTransfers.indexWhere((x) => x.id == editing.id);
+                                if (idx != -1) {
+                                  _allTransfers[idx] = updated;
+                                }
+                                setState(() {
+                                  _filtered = _applyFilters(_allTransfers);
+                                });
+                                _hideOverlay();
+                                _snack('Transfer updated!', color: _C.accentAmber);
+                              } else {
+                                // ── CREATE ──
+                                final now = DateTime.now();
+                                final List<GodownTransfer> saved = [];
+                                for (final r in valid) {
+                                  final rowNote = r.noteCtrl.text.trim();
+                                  final t = GodownTransfer(
+                                    id:            '',
+                                    itemName:      r.itemCtrl.text.trim(),
+                                    qty:           int.parse(r.qtyCtrl.text.trim()),
+                                    note:          rowNote.isNotEmpty ? rowNote : sharedNote,
+                                    transferredAt: now,
+                                  );
+                                  final ref = await _transfersRef.push();
+                                  await ref.set(t.toMap());
+                                  saved.add(GodownTransfer(
+                                    id:            ref.key!,
+                                    itemName:      t.itemName,
+                                    qty:           t.qty,
+                                    note:          t.note,
+                                    transferredAt: t.transferredAt,
+                                  ));
+                                }
+                                _allTransfers.insertAll(0, saved.reversed.toList());
+                                setState(() {
+                                  _filtered = _applyFilters(_allTransfers);
+                                });
+                                _hideOverlay();
+                                _snack('Saved ${saved.length} transfer${saved.length == 1 ? '' : 's'}!',
+                                    color: _C.accentGreen);
                               }
 
-                              _allTransfers.insertAll(
-                                  0,
-                                  saved.reversed.toList());
-                              setState(() {
-                                _filtered = _applyFilters(
-                                    _allTransfers);
-                              });
-
-                              for (final r in rows) {
-                                r.dispose();
-                              }
+                              for (final r in rows) r.dispose();
                               noteCtrl.dispose();
-
-                              _hideOverlay();
-                              _snack(
-                                'Saved ${saved.length} transfer${saved.length == 1 ? '' : 's'}!',
-                                color: _C.accentGreen,
-                              );
                             } catch (e) {
                               _hideOverlay();
-                              _snack('Error: $e',
-                                  color: _C.accentRed);
+                              _snack('Error: $e', color: _C.accentRed);
                             }
                           },
                         ),
@@ -742,9 +597,7 @@ class _GodownTransferPageState extends State<GodownTransferPage>
     );
   }
 
-  // Shared header cell builder (used inside StatefulBuilder scope)
-  static Widget _hCell(String label,
-      {int flex = 1, TextAlign align = TextAlign.left}) =>
+  static Widget _hCell(String label, {int flex = 1, TextAlign align = TextAlign.left}) =>
       Expanded(
         flex: flex,
         child: Text(label,
@@ -760,26 +613,19 @@ class _GodownTransferPageState extends State<GodownTransferPage>
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Delete Transfer',
-            style: TextStyle(
-                color: _C.textPrimary,
-                fontWeight: FontWeight.w600)),
-        content: Text(
-            'Delete transfer of ${t.qty} × "${t.itemName}"?',
+            style: TextStyle(color: _C.textPrimary, fontWeight: FontWeight.w600)),
+        content: Text('Delete transfer of ${t.qty} × "${t.itemName}"?',
             style: const TextStyle(color: _C.textSecondary)),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel',
-                  style: TextStyle(color: _C.textSecondary))),
+              child: const Text('Cancel', style: TextStyle(color: _C.textSecondary))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
               child: const Text('Delete',
-                  style: TextStyle(
-                      color: _C.accentRed,
-                      fontWeight: FontWeight.w600))),
+                  style: TextStyle(color: _C.accentRed, fontWeight: FontWeight.w600))),
         ],
       ),
     );
@@ -792,6 +638,198 @@ class _GodownTransferPageState extends State<GodownTransferPage>
     _snack('Deleted', color: _C.accentRed);
   }
 
+  // ── PDF Export ───────────────────────────────────────────────
+  Future<void> _exportPdf() async {
+    final pdf = pw.Document();
+    final now = DateTime.now();
+    final dateStr =
+        '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}';
+
+    final totals = _itemTotals;
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        header: (ctx) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text('Factory → Godown Transfers',
+                        style: pw.TextStyle(
+                            fontSize: 18, fontWeight: pw.FontWeight.bold)),
+                    pw.Text('Alkaram Hoseiry — Transfer Report',
+                        style: const pw.TextStyle(fontSize: 11, color: PdfColors.grey700)),
+                  ],
+                ),
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.end,
+                  children: [
+                    pw.Text('Generated: $dateStr',
+                        style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600)),
+                    pw.Text('Period: $_filterPeriod',
+                        style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600)),
+                  ],
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 4),
+            pw.Divider(color: PdfColors.teal),
+            pw.SizedBox(height: 8),
+          ],
+        ),
+        build: (ctx) => [
+          // Summary row
+          pw.Row(
+            children: [
+              _pdfSummaryBox('Total Transfers', _filtered.length.toString(), PdfColors.teal700),
+              pw.SizedBox(width: 12),
+              _pdfSummaryBox('Total Qty', _totalQty.toString(), PdfColors.purple700),
+              pw.SizedBox(width: 12),
+              _pdfSummaryBox('Unique Items', totals.length.toString(), PdfColors.orange700),
+            ],
+          ),
+          pw.SizedBox(height: 20),
+
+          // Item summary table
+          pw.Text('Item Summary',
+              style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 8),
+          pw.Table(
+            border: pw.TableBorder.all(color: PdfColors.grey300),
+            columnWidths: {
+              0: const pw.FlexColumnWidth(3),
+              1: const pw.FlexColumnWidth(1),
+              2: const pw.FlexColumnWidth(1),
+            },
+            children: [
+              pw.TableRow(
+                decoration: const pw.BoxDecoration(color: PdfColors.teal50),
+                children: [
+                  _pdfHeaderCell('Item Name'),
+                  _pdfHeaderCell('Total Qty', center: true),
+                  _pdfHeaderCell('Transfers', center: true),
+                ],
+              ),
+              ...totals.entries.map((e) {
+                final count = _filtered.where((t) => t.itemName == e.key).length;
+                return pw.TableRow(children: [
+                  _pdfCell(e.key),
+                  _pdfCell(e.value.toString(), center: true, bold: true, color: PdfColors.teal700),
+                  _pdfCell(count.toString(), center: true),
+                ]);
+              }),
+              pw.TableRow(
+                decoration: const pw.BoxDecoration(color: PdfColors.teal50),
+                children: [
+                  _pdfCell('TOTAL', bold: true),
+                  _pdfCell(_totalQty.toString(), center: true, bold: true, color: PdfColors.teal700),
+                  _pdfCell(_filtered.length.toString(), center: true, bold: true),
+                ],
+              ),
+            ],
+          ),
+
+          pw.SizedBox(height: 24),
+
+          // Detailed transfers
+          pw.Text('Transfer Details',
+              style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 8),
+          pw.Table(
+            border: pw.TableBorder.all(color: PdfColors.grey300),
+            columnWidths: {
+              0: const pw.FlexColumnWidth(3),
+              1: const pw.FlexColumnWidth(1),
+              2: const pw.FlexColumnWidth(3),
+              3: const pw.FlexColumnWidth(2),
+            },
+            children: [
+              pw.TableRow(
+                decoration: const pw.BoxDecoration(color: PdfColors.teal50),
+                children: [
+                  _pdfHeaderCell('Item Name'),
+                  _pdfHeaderCell('Qty', center: true),
+                  _pdfHeaderCell('Note'),
+                  _pdfHeaderCell('Date/Time'),
+                ],
+              ),
+              ..._filtered.map((t) {
+                final d = t.transferredAt;
+                final ds =
+                    '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year} '
+                    '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+                return pw.TableRow(children: [
+                  _pdfCell(t.itemName),
+                  _pdfCell(t.qty.toString(), center: true, bold: true, color: PdfColors.teal700),
+                  _pdfCell(t.note),
+                  _pdfCell(ds, fontSize: 9),
+                ]);
+              }),
+            ],
+          ),
+        ],
+      ),
+    );
+
+    await Printing.layoutPdf(onLayout: (fmt) async => pdf.save());
+  }
+
+  static pw.Widget _pdfSummaryBox(String label, String value, PdfColor color) =>
+      pw.Expanded(
+        child: pw.Container(
+          padding: const pw.EdgeInsets.all(12),
+          decoration: pw.BoxDecoration(
+            border: pw.Border.all(color: PdfColors.grey300),
+            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+          ),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              pw.Text(value,
+                  style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: color)),
+              pw.SizedBox(height: 4),
+              pw.Text(label,
+                  style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
+                  textAlign: pw.TextAlign.center),
+            ],
+          ),
+        ),
+      );
+
+  static pw.Widget _pdfHeaderCell(String text, {bool center = false}) =>
+      pw.Padding(
+        padding: const pw.EdgeInsets.all(7),
+        child: pw.Text(text,
+            textAlign: center ? pw.TextAlign.center : pw.TextAlign.left,
+            style: pw.TextStyle(
+                fontSize: 11,
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.teal800)),
+      );
+
+  static pw.Widget _pdfCell(
+      String text, {
+        bool center = false,
+        bool bold = false,
+        PdfColor? color,
+        double fontSize = 10,
+      }) =>
+      pw.Padding(
+        padding: const pw.EdgeInsets.all(6),
+        child: pw.Text(text,
+            textAlign: center ? pw.TextAlign.center : pw.TextAlign.left,
+            style: pw.TextStyle(
+                fontSize: fontSize,
+                fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+                color: color ?? PdfColors.grey900)),
+      );
+
   // ── Report helpers ───────────────────────────────────────────
   Map<String, int> get _itemTotals {
     final map = <String, int>{};
@@ -802,8 +840,7 @@ class _GodownTransferPageState extends State<GodownTransferPage>
       ..sort((a, b) => b.value.compareTo(a.value)));
   }
 
-  int get _totalQty =>
-      _filtered.fold(0, (sum, t) => sum + t.qty);
+  int get _totalQty => _filtered.fold(0, (sum, t) => sum + t.qty);
 
   // ── Overlay / snack ──────────────────────────────────────────
   OverlayEntry? _overlayEntry;
@@ -817,18 +854,12 @@ class _GodownTransferPageState extends State<GodownTransferPage>
             child: Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                  color: _C.bgCard,
-                  borderRadius: BorderRadius.circular(16)),
-              child: const Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(
-                        color: _C.accentTeal),
-                    SizedBox(height: 12),
-                    Text('Saving...',
-                        style: TextStyle(
-                            color: _C.textPrimary)),
-                  ]),
+                  color: _C.bgCard, borderRadius: BorderRadius.circular(16)),
+              child: const Column(mainAxisSize: MainAxisSize.min, children: [
+                CircularProgressIndicator(color: _C.accentTeal),
+                SizedBox(height: 12),
+                Text('Saving...', style: TextStyle(color: _C.textPrimary)),
+              ]),
             ),
           ),
         ),
@@ -845,8 +876,7 @@ class _GodownTransferPageState extends State<GodownTransferPage>
   void _snack(String msg, {Color color = _C.accentGreen}) {
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg,
-          style: const TextStyle(color: _C.textPrimary)),
+      content: Text(msg, style: const TextStyle(color: _C.textPrimary)),
       backgroundColor: _C.bgCard,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(
@@ -867,9 +897,7 @@ class _GodownTransferPageState extends State<GodownTransferPage>
       backgroundColor: _C.bgPrimary,
       appBar: _buildAppBar(),
       body: _isLoading
-          ? const Center(
-          child: CircularProgressIndicator(
-              color: _C.accentTeal))
+          ? const Center(child: CircularProgressIndicator(color: _C.accentTeal))
           : Column(children: [
         _buildFilters(),
         TabBar(
@@ -878,12 +906,8 @@ class _GodownTransferPageState extends State<GodownTransferPage>
           unselectedLabelColor: _C.textSecondary,
           indicatorColor: _C.accentTeal,
           tabs: const [
-            Tab(
-                icon: Icon(Icons.list_alt),
-                text: 'Transfers'),
-            Tab(
-                icon: Icon(Icons.bar_chart),
-                text: 'Report'),
+            Tab(icon: Icon(Icons.list_alt), text: 'Transfers'),
+            Tab(icon: Icon(Icons.bar_chart), text: 'Report'),
           ],
         ),
         Expanded(
@@ -902,8 +926,7 @@ class _GodownTransferPageState extends State<GodownTransferPage>
         foregroundColor: Colors.white,
         elevation: 2,
         icon: const Icon(Icons.add),
-        label: const Text('New Transfer',
-            style: TextStyle(fontWeight: FontWeight.w600)),
+        label: const Text('New Transfer', style: TextStyle(fontWeight: FontWeight.w600)),
       ),
     );
   }
@@ -920,12 +943,14 @@ class _GodownTransferPageState extends State<GodownTransferPage>
     ),
     title: const Text('Godown Transfers'),
     titleTextStyle: const TextStyle(
-        color: Colors.white,
-        fontSize: 18,
-        fontWeight: FontWeight.w700),
+        color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
     iconTheme: const IconThemeData(color: Colors.white),
     elevation: 0,
     actions: [
+      IconButton(
+          icon: const Icon(Icons.picture_as_pdf),
+          onPressed: _exportPdf,
+          tooltip: 'Export PDF'),
       IconButton(
           icon: const Icon(Icons.sync),
           onPressed: _loadData,
@@ -941,18 +966,14 @@ class _GodownTransferPageState extends State<GodownTransferPage>
         child: TextField(
           controller: _searchCtrl,
           onChanged: _onSearch,
-          style:
-          const TextStyle(color: _C.textPrimary, fontSize: 14),
+          style: const TextStyle(color: _C.textPrimary, fontSize: 14),
           decoration: InputDecoration(
             hintText: 'Search by item or note...',
-            hintStyle:
-            const TextStyle(color: _C.textSecondary),
-            prefixIcon: const Icon(Icons.search,
-                color: _C.accentTeal, size: 20),
+            hintStyle: const TextStyle(color: _C.textSecondary),
+            prefixIcon: const Icon(Icons.search, color: _C.accentTeal, size: 20),
             suffixIcon: _searchQuery.isNotEmpty
                 ? IconButton(
-                icon: const Icon(Icons.clear,
-                    size: 18, color: _C.textSecondary),
+                icon: const Icon(Icons.clear, size: 18, color: _C.textSecondary),
                 onPressed: () {
                   _searchCtrl.clear();
                   _onSearch('');
@@ -960,20 +981,16 @@ class _GodownTransferPageState extends State<GodownTransferPage>
                 : null,
             filled: true,
             fillColor: Colors.white,
-            contentPadding:
-            const EdgeInsets.symmetric(vertical: 12),
+            contentPadding: const EdgeInsets.symmetric(vertical: 12),
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide:
-                const BorderSide(color: _C.border)),
+                borderSide: const BorderSide(color: _C.border)),
             enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide:
-                const BorderSide(color: _C.border)),
+                borderSide: const BorderSide(color: _C.border)),
             focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(
-                    color: _C.accentTeal, width: 1.5)),
+                borderSide: const BorderSide(color: _C.accentTeal, width: 1.5)),
           ),
         ),
       ),
@@ -986,34 +1003,25 @@ class _GodownTransferPageState extends State<GodownTransferPage>
               child: ChoiceChip(
                 label: Text(p),
                 selected: _filterPeriod == p,
-                selectedColor:
-                _C.accentTeal.withOpacity(0.15),
+                selectedColor: _C.accentTeal.withOpacity(0.15),
                 labelStyle: TextStyle(
-                    color: _filterPeriod == p
-                        ? _C.accentTeal
-                        : _C.textSecondary,
+                    color: _filterPeriod == p ? _C.accentTeal : _C.textSecondary,
                     fontSize: 12,
-                    fontWeight: _filterPeriod == p
-                        ? FontWeight.w600
-                        : FontWeight.normal),
+                    fontWeight: _filterPeriod == p ? FontWeight.w600 : FontWeight.normal),
                 onSelected: (_) => _setPeriod(p),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                     side: BorderSide(
-                        color: _filterPeriod == p
-                            ? _C.accentTeal
-                            : _C.border)),
+                        color: _filterPeriod == p ? _C.accentTeal : _C.border)),
               ),
             ),
           const Spacer(),
           Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
               color: _C.accentTeal.withOpacity(0.08),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                  color: _C.accentTeal.withOpacity(0.2)),
+              border: Border.all(color: _C.accentTeal.withOpacity(0.2)),
             ),
             child: Text('${_filtered.length} records',
                 style: const TextStyle(
@@ -1033,12 +1041,10 @@ class _GodownTransferPageState extends State<GodownTransferPage>
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.local_shipping_outlined,
-                size: 48,
-                color: _C.accentTeal.withOpacity(0.3)),
+                size: 48, color: _C.accentTeal.withOpacity(0.3)),
             const SizedBox(height: 12),
             const Text('No transfers found',
-                style: TextStyle(
-                    color: _C.textSecondary, fontSize: 15)),
+                style: TextStyle(color: _C.textSecondary, fontSize: 15)),
           ],
         ),
       );
@@ -1046,8 +1052,7 @@ class _GodownTransferPageState extends State<GodownTransferPage>
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       itemCount: _filtered.length,
-      itemBuilder: (_, i) =>
-          _buildTransferTile(_filtered[i]),
+      itemBuilder: (_, i) => _buildTransferTile(_filtered[i]),
     );
   }
 
@@ -1063,22 +1068,15 @@ class _GodownTransferPageState extends State<GodownTransferPage>
         color: _C.bgCard,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: _C.border),
-        boxShadow: const [
-          BoxShadow(
-              color: _C.shadow,
-              blurRadius: 4,
-              offset: Offset(0, 2))
-        ],
+        boxShadow: const [BoxShadow(color: _C.shadow, blurRadius: 4, offset: Offset(0, 2))],
       ),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16, vertical: 10),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         leading: Container(
           width: 48,
           height: 48,
           decoration: BoxDecoration(
-              color: _C.accentTeal.withOpacity(0.1),
-              shape: BoxShape.circle),
+              color: _C.accentTeal.withOpacity(0.1), shape: BoxShape.circle),
           child: Center(
               child: Text(t.qty.toString(),
                   style: const TextStyle(
@@ -1088,52 +1086,52 @@ class _GodownTransferPageState extends State<GodownTransferPage>
         ),
         title: Text(t.itemName,
             style: const TextStyle(
-                color: _C.textPrimary,
-                fontWeight: FontWeight.w600,
-                fontSize: 14)),
+                color: _C.textPrimary, fontWeight: FontWeight.w600, fontSize: 14)),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (t.note.isNotEmpty) ...[
               const SizedBox(height: 3),
-              Text(t.note,
-                  style: const TextStyle(
-                      color: _C.textSecondary, fontSize: 12)),
+              Text(t.note, style: const TextStyle(color: _C.textSecondary, fontSize: 12)),
             ],
             const SizedBox(height: 3),
-            Text(dateStr,
-                style: const TextStyle(
-                    color: _C.textSecondary, fontSize: 11)),
+            Text(dateStr, style: const TextStyle(color: _C.textSecondary, fontSize: 11)),
           ],
         ),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 10, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
                 color: _C.accentTeal.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(8)),
             child: const Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.arrow_forward,
-                  color: _C.accentTeal, size: 12),
+              Icon(Icons.arrow_forward, color: _C.accentTeal, size: 12),
               SizedBox(width: 4),
               Text('Godown',
                   style: TextStyle(
-                      color: _C.accentTeal,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600)),
+                      color: _C.accentTeal, fontSize: 11, fontWeight: FontWeight.w600)),
             ]),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
+          // ── Edit button ──
+          GestureDetector(
+            onTap: () => _showAddDialog(editing: t),
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                  color: _C.accentAmber.withOpacity(0.12), shape: BoxShape.circle),
+              child: const Icon(Icons.edit_outlined, color: _C.accentAmber, size: 16),
+            ),
+          ),
+          const SizedBox(width: 6),
+          // ── Delete button ──
           GestureDetector(
             onTap: () => _deleteTransfer(t),
             child: Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                  color: _C.accentRed.withOpacity(0.1),
-                  shape: BoxShape.circle),
-              child: const Icon(Icons.delete_outline,
-                  color: _C.accentRed, size: 16),
+                  color: _C.accentRed.withOpacity(0.1), shape: BoxShape.circle),
+              child: const Icon(Icons.delete_outline, color: _C.accentRed, size: 16),
             ),
           ),
         ]),
@@ -1148,13 +1146,10 @@ class _GodownTransferPageState extends State<GodownTransferPage>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.bar_chart,
-                size: 48,
-                color: _C.accentTeal.withOpacity(0.3)),
+            Icon(Icons.bar_chart, size: 48, color: _C.accentTeal.withOpacity(0.3)),
             const SizedBox(height: 12),
             const Text('No data for selected period',
-                style: TextStyle(
-                    color: _C.textSecondary, fontSize: 15)),
+                style: TextStyle(color: _C.textSecondary, fontSize: 15)),
           ],
         ),
       );
@@ -1166,20 +1161,14 @@ class _GodownTransferPageState extends State<GodownTransferPage>
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
       children: [
         Row(children: [
-          Expanded(
-              child: _summaryCard('Total Transfers',
-                  _filtered.length.toString(),
-                  Icons.swap_horiz, _C.accentTeal)),
+          Expanded(child: _summaryCard('Total Transfers', _filtered.length.toString(),
+              Icons.swap_horiz, _C.accentTeal)),
           const SizedBox(width: 12),
-          Expanded(
-              child: _summaryCard('Total Qty',
-                  _totalQty.toString(),
-                  Icons.inventory_2, _C.accentPurple)),
+          Expanded(child: _summaryCard('Total Qty', _totalQty.toString(),
+              Icons.inventory_2, _C.accentPurple)),
           const SizedBox(width: 12),
-          Expanded(
-              child: _summaryCard('Unique Items',
-                  totals.length.toString(),
-                  Icons.category, _C.accentOrange)),
+          Expanded(child: _summaryCard('Unique Items', totals.length.toString(),
+              Icons.category, _C.accentOrange)),
         ]),
         const SizedBox(height: 20),
 
@@ -1189,19 +1178,13 @@ class _GodownTransferPageState extends State<GodownTransferPage>
             color: _C.bgCard,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: _C.border),
-            boxShadow: const [
-              BoxShadow(
-                  color: _C.shadow,
-                  blurRadius: 6,
-                  offset: Offset(0, 2))
-            ],
+            boxShadow: const [BoxShadow(color: _C.shadow, blurRadius: 6, offset: Offset(0, 2))],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
-                const Icon(Icons.bar_chart,
-                    color: _C.accentTeal, size: 18),
+                const Icon(Icons.bar_chart, color: _C.accentTeal, size: 18),
                 const SizedBox(width: 8),
                 Text('Items Transferred — $_filterPeriod',
                     style: const TextStyle(
@@ -1237,11 +1220,8 @@ class _GodownTransferPageState extends State<GodownTransferPage>
                         borderRadius: BorderRadius.circular(4),
                         child: LinearProgressIndicator(
                           value: pct,
-                          backgroundColor:
-                          _C.accentTeal.withOpacity(0.1),
-                          valueColor:
-                          const AlwaysStoppedAnimation(
-                              _C.accentTeal),
+                          backgroundColor: _C.accentTeal.withOpacity(0.1),
+                          valueColor: const AlwaysStoppedAnimation(_C.accentTeal),
                           minHeight: 8,
                         ),
                       ),
@@ -1260,115 +1240,78 @@ class _GodownTransferPageState extends State<GodownTransferPage>
             color: _C.bgCard,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: _C.border),
-            boxShadow: const [
-              BoxShadow(
-                  color: _C.shadow,
-                  blurRadius: 6,
-                  offset: Offset(0, 2))
-            ],
+            boxShadow: const [BoxShadow(color: _C.shadow, blurRadius: 6, offset: Offset(0, 2))],
           ),
           child: Column(children: [
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: const BoxDecoration(
                 color: Color(0xFFE0F2F1),
-                borderRadius: BorderRadius.vertical(
-                    top: Radius.circular(14)),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
               ),
               child: const Row(children: [
-                Expanded(
-                    flex: 3,
+                Expanded(flex: 3,
                     child: Text('Item',
-                        style: TextStyle(
-                            color: _C.accentTeal,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13))),
+                        style: TextStyle(color: _C.accentTeal, fontWeight: FontWeight.w700, fontSize: 13))),
                 Expanded(
                     child: Text('Qty',
                         textAlign: TextAlign.center,
-                        style: TextStyle(
-                            color: _C.accentTeal,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13))),
+                        style: TextStyle(color: _C.accentTeal, fontWeight: FontWeight.w700, fontSize: 13))),
                 Expanded(
                     child: Text('Transfers',
                         textAlign: TextAlign.center,
-                        style: TextStyle(
-                            color: _C.accentTeal,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13))),
+                        style: TextStyle(color: _C.accentTeal, fontWeight: FontWeight.w700, fontSize: 13))),
               ]),
             ),
             ...totals.entries.toList().asMap().entries.map((entry) {
               final i = entry.key;
               final e = entry.value;
-              final count =
-                  _filtered.where((t) => t.itemName == e.key).length;
+              final count = _filtered.where((t) => t.itemName == e.key).length;
               return Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 11),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
                 decoration: BoxDecoration(
                   color: i.isEven ? Colors.white : _C.bgPrimary,
-                  border:
-                  const Border(top: BorderSide(color: _C.border)),
+                  border: const Border(top: BorderSide(color: _C.border)),
                 ),
                 child: Row(children: [
-                  Expanded(
-                      flex: 3,
+                  Expanded(flex: 3,
                       child: Text(e.key,
-                          style: const TextStyle(
-                              color: _C.textPrimary, fontSize: 13),
+                          style: const TextStyle(color: _C.textPrimary, fontSize: 13),
                           overflow: TextOverflow.ellipsis)),
                   Expanded(
                       child: Text(e.value.toString(),
                           textAlign: TextAlign.center,
                           style: const TextStyle(
-                              color: _C.accentTeal,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13))),
+                              color: _C.accentTeal, fontWeight: FontWeight.w700, fontSize: 13))),
                   Expanded(
                       child: Text(count.toString(),
                           textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              color: _C.textSecondary,
-                              fontSize: 13))),
+                          style: const TextStyle(color: _C.textSecondary, fontSize: 13))),
                 ]),
               );
             }),
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: const BoxDecoration(
                 color: Color(0xFFE0F2F1),
-                borderRadius: BorderRadius.vertical(
-                    bottom: Radius.circular(14)),
-                border: Border(
-                    top: BorderSide(
-                        color: _C.accentTeal, width: 1.5)),
+                borderRadius: BorderRadius.vertical(bottom: Radius.circular(14)),
+                border: Border(top: BorderSide(color: _C.accentTeal, width: 1.5)),
               ),
               child: Row(children: [
-                const Expanded(
-                    flex: 3,
+                const Expanded(flex: 3,
                     child: Text('TOTAL',
                         style: TextStyle(
-                            color: _C.accentTeal,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 13))),
+                            color: _C.accentTeal, fontWeight: FontWeight.w800, fontSize: 13))),
                 Expanded(
                     child: Text(_totalQty.toString(),
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                            color: _C.accentTeal,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 13))),
+                            color: _C.accentTeal, fontWeight: FontWeight.w800, fontSize: 13))),
                 Expanded(
                     child: Text(_filtered.length.toString(),
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                            color: _C.accentTeal,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 13))),
+                            color: _C.accentTeal, fontWeight: FontWeight.w800, fontSize: 13))),
               ]),
             ),
           ]),
@@ -1377,33 +1320,23 @@ class _GodownTransferPageState extends State<GodownTransferPage>
     );
   }
 
-  Widget _summaryCard(
-      String label, String value, IconData icon, Color color) {
+  Widget _summaryCard(String label, String value, IconData icon, Color color) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: _C.bgCard,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: _C.border),
-        boxShadow: const [
-          BoxShadow(
-              color: _C.shadow,
-              blurRadius: 4,
-              offset: Offset(0, 2))
-        ],
+        boxShadow: const [BoxShadow(color: _C.shadow, blurRadius: 4, offset: Offset(0, 2))],
       ),
       child: Column(children: [
         Icon(icon, color: color, size: 22),
         const SizedBox(height: 8),
         Text(value,
-            style: TextStyle(
-                color: color,
-                fontSize: 20,
-                fontWeight: FontWeight.w800)),
+            style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.w800)),
         const SizedBox(height: 4),
         Text(label,
-            style: const TextStyle(
-                color: _C.textSecondary, fontSize: 11),
+            style: const TextStyle(color: _C.textSecondary, fontSize: 11),
             textAlign: TextAlign.center),
       ]),
     );
